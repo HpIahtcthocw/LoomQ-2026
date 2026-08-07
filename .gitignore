@@ -5,3 +5,10 @@
 **/.DStore
 __pycache__/
 *.py[cod]
+
+.venv/
+venv/
+
+# 评测与调试产物，不进提交
+report.json
+starter_kit/report.json
