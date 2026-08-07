@@ -12,3 +12,11 @@ venv/
 # 评测与调试产物，不进提交
 report.json
 starter_kit/report.json
+starter_kit/_l2_report.json
+
+# 兜底：任何形式的密钥文件都不许进仓库。L2 的 key 只从环境变量读，
+# 见 starter_kit/llm_client.py 的 LOOMQ_LLM_* 契约。
+.env
+.env.*
+*.key
+secrets.json

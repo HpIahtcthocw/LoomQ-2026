@@ -54,6 +54,22 @@ shots：[待填写]
 截图或演示视频：[待补充录屏，路径 evidence/files/cli-demo.mp4]
 ```
 
+**客观分前置条件已实测满足。** 题面规定这 10 分交互分只在 L2 客观分 ≥ 12 时才计入。
+用 `l2_policy.json` 指定的正式模型 `deepseek-v4-flash`（temperature 0、thinking 关闭，
+与官方一致）实测，24 个对标用例全部通过，折算客观分 ≈ 20/20，连续三轮稳定：
+
+```text
+python tools/selftest_l2_live.py            # 24 个对标用例，需 LOOMQ_LLM_* 环境变量
+python tools/selftest_l2_live.py --stretch  # 另加 12 个刻意超纲的进阶用例
+```
+
+判定口径与官方对齐，不是自己放水：抽 QASM 用的是官方 `evaluator.py` 里同一个正则，
+电路由纯标准库的 `refsim` 无噪声精确模拟后比 Hellinger 保真度、阈值同为 0.97，
+选后端的正确答案集由 `backend_capabilities.json` 按约束现算而非写死在测试里。
+
+之所以要自建这套压测，是因为公开的 `evaluator.py --level l2` 只有 1 个用例，
+且只校验"回复里能抽出可解析的 QASM"，不校验电路对不对——它全绿并不能说明任何问题。
+
 交互设计上有三点是刻意为之，便于现场核验：
 
 1. **永远能跑起来。** 未安装量子 SDK 时自动回落到内置参考模拟器（纯标准库精确模拟），
@@ -75,7 +91,7 @@ shots：[待填写]
   最小验证（无需任何第三方依赖，也不需要 API key，全部约 10 秒）：
     python tools/selftest_transpile.py     # 转译层，37 项断言
     python tools/selftest_decompose.py     # 门分解数值验证，22 项断言
-    python tools/selftest_agent.py         # L2 Agent，36 项断言，用本地假端点
+    python tools/selftest_agent.py         # L2 Agent，42 项断言，用本地假端点
     python tools/gen_circuits.py           # 生成隐藏电路回归集 + 灵敏度检验
     python tools/run_regression.py         # 回归集比对理想分布
     cd starter_kit && python -m loomq.cli --demo
@@ -101,6 +117,20 @@ shots：[待填写]
   保真度全部 >= 0.989（官方阈值 0.97），命令：
     python tools/run_regression.py --target spinq,braket
   这比只跑公开的 bell/ghz3 强得多——后两者分布回文对称，位序写反了也照样 PASS。
+
+L2 自验闭环的一处非平凡设计（可现场问询）：
+  "生成 → 自验 → 不对就重试"这个推荐方案有个反直觉的失效模式——自验基准取错时，
+  它不修错，而是把对的改成错的。实测抓到过：用户要"测量只能是 01 或 10"的两比特
+  纠缠态，模型给出的电路和它声明的分布都对，但把 target_family 标成了 "bell"。
+  旧实现把 "bell" 硬解释为 00/11，据此否决正确电路，再把"你应该落在 00/11"喂回去，
+  模型照办，第二轮交出真正错误的答案。
+  根因是族名只能定到"族"、定不到唯一成员：贝尔态有四个，Φ± 测得 00/11，Ψ± 测得 01/10。
+  但简单改成"信模型声明的分布"会拆掉防伪造守卫，而这两种情形在代码视野里结构同形，
+  唯一的区分依据是用户原话。所以 classify_verification 返回三态而不是布尔值，
+  冲突时不擅自判决，改为带着用户原始请求和 refsim 精确算出的实际分布做一次定向裁决
+  ——问"这个分布是否满足用户要求"，而不是"你的标签对不对"。
+  见 loomq/agent.py 的 classify_verification / adjudicate_label_conflict，
+  以及 tools/selftest_agent.py 里"标签冲突·救回 / 标签冲突·否决"两组用例。
 
 目标用户和使用场景：
   有明确问题意识、具备基本计算机使用能力，但没有量子物理背景的人——

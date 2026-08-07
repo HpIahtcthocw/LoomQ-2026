@@ -157,14 +157,101 @@ def test_self_verify_retry() -> None:
 
 
 def test_self_consistent_forgery_is_caught() -> None:
-    """模型编一个错电路，又编一个与之自洽的错期望——必须被独立参考分布挡住。"""
+    """模型编一个错电路，又编一个与之**真正**自洽的错期望——必须被族名推导挡住。
+
+    注意 expected 必须按小端序写（key = c[2]c[1]c[0]）。GHZ3_BAD 少了第二个 cx，得到
+    (|q0q1q2=000> + |q0q1q2=110>)/√2，对应位串是 000 与 011，不是 110。早先这里误写成
+    {000,110}，那个"假期望"其实和错电路对不上，于是这条断言是靠巧合通过的，真正的
+    自洽造假路径从未被测到。
+    """
     forged = payload(GHZ3_BAD, family="ghz", n=3,
-                     expected={"000": 0.5, "110": 0.5})  # 与错电路自洽的假期望
+                     expected={"000": 0.5, "011": 0.5})  # 与错电路真正自洽的假期望
     reply = run_agent("生成 3 比特 GHZ 态", [forged, forged, forged])
-    check("防伪:自洽的假期望没能骗过验证", len(CALL_LOG) == 3, "实际调用 %d 次" % len(CALL_LOG))
+    # 真自洽的造假现在会命中 LABEL_CONFLICT，于是每轮多一次裁决调用：3 轮 × (生成 + 裁决) = 6。
+    # 这里的假端点对裁决请求也只会回吐那个 forged payload，它没有 matches_user_request
+    # 字段，裁决按 False 处理并退回重试——正是我们要的保守行为。
+    check("防伪:自洽的假期望没能骗过验证", len(CALL_LOG) == 6, "实际调用 %d 次" % len(CALL_LOG))
+    check("防伪:裁决被触发且未放行", "没有通过我的自动验证" in reply, reply[:160])
     check("防伪:三次都失败后如实告知用户", "没有通过我的自动验证" in reply, reply[:160])
     check("防伪:仍然把电路交了出去，没有空手而归",
           extract_like_evaluator(reply) is not None)
+    check("防伪:交付的不是被标为已验证的结果", "第 2 次尝试" not in reply and
+          "已按你的原始要求确认" not in reply, reply[:160])
+
+
+# 正确的"01/10 各一半"两比特纠缠态：h, cx 之后翻转 q[1]
+PSI_PLUS = """OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[2];
+creg c[2];
+h q[0];
+cx q[0],q[1];
+x q[1];
+measure q[0] -> c[0];
+measure q[1] -> c[1];
+"""
+
+
+def test_label_conflict_does_not_destroy_correct_answer() -> None:
+    """族名贴错但电路正确时，裁决必须救回它，而不是把它改坏。
+
+    这是实测踩到的真实事故：模型被要求做"测量只能是 01 或 10"的两比特纠缠态，电路
+    (h, cx, x) 和声明分布 {01,10} 都对，但 target_family 标成了 "bell"。旧实现把 bell
+    硬解释成 00/11，据此否决正确电路，再通过重试把模型"纠正"成真错的贝尔态。
+    """
+    mislabeled = json.dumps({
+        "task": "generate",
+        "qasm": PSI_PLUS,
+        "target_family": "bell",           # 贴错了：这是 Ψ+，不是 Φ+
+        "n_qubits": 2,
+        "expected_distribution": {"01": 0.5, "10": 0.5},   # 这个是对的
+        "explanation": "两个比特测出来一定一个 0 一个 1。",
+    }, ensure_ascii=False)
+    adjudication = json.dumps({"matches_user_request": True, "why": "分布正是 01 与 10 各一半"})
+    reply = run_agent("做一个两比特电路，测量结果只可能是 01 或 10，各占一半",
+                      [mislabeled, adjudication])
+    check("标签冲突:只多花了一次裁决调用", len(CALL_LOG) == 2, "实际调用 %d 次" % len(CALL_LOG))
+    delivered = extract_like_evaluator(reply)
+    check("标签冲突:交付的电路没有被改动",
+          bool(delivered) and "x q[1];" in delivered, repr(delivered))
+    check("标签冲突:交付的电路分布确实是 01/10",
+          agent.verify_qasm(delivered or "", "custom", 2, {"01": 0.5, "10": 0.5})[0])
+    check("标签冲突:裁决 prompt 里带了实际分布而不是标签",
+          len(CALL_LOG) > 1 and "01:0.5" in json.dumps(CALL_LOG[1], ensure_ascii=False),
+          json.dumps(CALL_LOG[-1], ensure_ascii=False)[:200])
+
+
+def test_label_conflict_rejected_falls_back_to_retry() -> None:
+    """裁决说"不满足用户要求"时，必须退回正常重试，不能放宽标准。"""
+    mislabeled = json.dumps({
+        "task": "generate",
+        "qasm": PSI_PLUS,
+        "target_family": "bell",
+        "n_qubits": 2,
+        "expected_distribution": {"01": 0.5, "10": 0.5},
+        "explanation": "两个比特测出来一定一个 0 一个 1。",
+    }, ensure_ascii=False)
+    refuse = json.dumps({"matches_user_request": False, "why": "用户要的是 00 与 11"})
+    bell_good = json.dumps({
+        "task": "generate",
+        "qasm": """OPENQASM 2.0;
+include "qelib1.inc";
+qreg q[2];
+creg c[2];
+h q[0];
+cx q[0],q[1];
+measure q[0] -> c[0];
+measure q[1] -> c[1];
+""",
+        "target_family": "bell",
+        "n_qubits": 2,
+        "expected_distribution": {"00": 0.5, "11": 0.5},
+        "explanation": "两个比特要么都是 0 要么都是 1。",
+    }, ensure_ascii=False)
+    reply = run_agent("我想要一个贝尔态", [mislabeled, refuse, bell_good])
+    check("标签冲突:裁决否决后继续重试", len(CALL_LOG) == 3, "实际调用 %d 次" % len(CALL_LOG))
+    check("标签冲突:最终交付的是 00/11 的贝尔态",
+          agent.verify_qasm(extract_like_evaluator(reply) or "", "bell", 2, None)[0])
 
 
 def test_custom_family_falls_back_to_declared() -> None:
@@ -277,6 +364,8 @@ def main() -> int:
         ("意图生成", test_generation_happy_path),
         ("自验重试", test_self_verify_retry),
         ("防伪造", test_self_consistent_forgery_is_caught),
+        ("标签冲突·救回", test_label_conflict_does_not_destroy_correct_answer),
+        ("标签冲突·否决", test_label_conflict_rejected_falls_back_to_retry),
         ("custom 回退", test_custom_family_falls_back_to_declared),
         ("选后端·基本", test_backend_selection_from_table),
         ("选后端·真机免费", test_backend_selection_real_hardware_free),

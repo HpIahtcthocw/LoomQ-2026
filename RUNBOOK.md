@@ -183,7 +183,7 @@ cd ..
 ```bash
 python tools/selftest_transpile.py     # 转译层，37 项
 python tools/selftest_decompose.py     # 门分解数值验证，22 项
-python tools/selftest_agent.py         # L2 Agent，36 项，用本地假端点
+python tools/selftest_agent.py         # L2 Agent，42 项，用本地假端点
 python tools/gen_circuits.py           # 重新生成隐藏电路回归集 + 灵敏度检验
 python tools/run_regression.py         # 回归集跑一遍参考模拟器
 ```
@@ -325,15 +325,21 @@ OpenQASM 3 的 `cp` 都对；OriginIR 契约里写的 `CR` **是否为 cu1 语�
 
 ## 步骤 8 · L2（30 分，专项奖主战场）
 
-**代码已写完并离线验证过**（`tools/selftest_agent.py` 36 项，用本地假端点模拟模型返回，
-不需要 API key）。这一步要做的是接真实模型。`submission.yaml` 里的 `l2: true` 与
-`network.required_for_l2: true` 也已经改好，不用再动。
+**已接真实模型跑通**（`deepseek-v4-flash`，对标组 24/24）。`submission.yaml` 里的
+`l2: true` 与 `network.required_for_l2: true` 已经改好，不用再动。
 
-配环境变量。自备 DeepSeek key，**组委会赛前不提供任何额度**：
+先明确这一级的分值结构，它比看上去要紧：客观分 20（12 个隐藏 case，通过率 × 20），
+交互体验分 10，而**交互分只在客观分 ≥ 12 时才计入**。也就是 12 个 case 至少要过 8 个，
+否则做得再好的 CLI 也一分不得。专项奖的资格因此直接压在这里。
+
+配环境变量。自备 DeepSeek key，**组委会赛前不提供任何额度**。
+`l2_policy.json` 写明正式评分用 `deepseek-v4-flash`，而 `llm_client.py` 只在模型名
+**恰好等于**这个字符串时才发送 `thinking: {"type":"disabled"}`——用 `deepseek-chat`
+之类的别名跑出来的结果不能代表正式环境：
 
 ```bash
 # macOS / Linux
-export LOOMQ_LLM_BASE_URL=https://api.deepseek.com
+export LOOMQ_LLM_BASE_URL=https://api.deepseek.com/v1
 export LOOMQ_LLM_API_KEY=<你自己的 key>
 export LOOMQ_LLM_MODEL=deepseek-v4-flash
 export LOOMQ_LLM_TIMEOUT_SECONDS=120
@@ -341,35 +347,51 @@ export LOOMQ_LLM_TIMEOUT_SECONDS=120
 
 ```powershell
 # Windows PowerShell
-$env:LOOMQ_LLM_BASE_URL = "https://api.deepseek.com"
+$env:LOOMQ_LLM_BASE_URL = "https://api.deepseek.com/v1"
 $env:LOOMQ_LLM_API_KEY  = "<你自己的 key>"
 $env:LOOMQ_LLM_MODEL    = "deepseek-v4-flash"
 $env:LOOMQ_LLM_TIMEOUT_SECONDS = "120"
 ```
 
-先用 CLI 打一发，确认链路通（比直接跑 evaluator 更容易看出是哪一环坏了）：
+**key 只走环境变量，绝不写进文件。** 仓库是公开的，key 一旦提交就会被 GitHub 的
+secret scanning 抓到并可能被盗用；`.gitignore` 里已经兜底屏蔽了 `.env` / `*.key` /
+`secrets.json`，但最稳妥的还是压根不落盘。
+
+三条命令，从轻到重：
 
 ```bash
 cd starter_kit
-python -m loomq.cli --ask "让三个比特全都纠缠起来"
-python evaluator.py --level l2
+python -m loomq.cli --ask "让三个比特全都纠缠起来"   # 看链路通不通
+python evaluator.py --level l2                        # 官方契约自测
 cd ..
+python tools/selftest_l2_live.py                      # 真实通过率压测
 ```
 
-**通过判据**：CLI 能生成电路并显示"自验通过"；`evaluator.py --level l2` 三类任务全 PASS。
+**通过判据**：CLI 能生成电路并显示自验通过；`evaluator.py --level l2` PASS；
+`selftest_l2_live.py` 对标组 24/24、折算客观分 ≈ 20/20。
 
-Agent 内部有**自验重试闭环**：生成的 QASM 会先用 `refsim` 算出分布并与模型声明的期望
-比对，不一致就把具体差异塞回 prompt 重试，最多三次。所以偶发的模型抽风不会直接变成
-失败。若三次都不过，它会如实告知但仍把电路交出来——不让用户空手而归。
+注意 `evaluator.py --level l2` **只有 1 个公开用例，而且只校验"回复里能抽出可解析的
+QASM"，不校验电路对不对**——它过了完全不代表能得分。真正能估通过率的是
+`selftest_l2_live.py`：24 个对标用例覆盖题面三类任务的措辞、比特数、目标态变体，
+判定口径与官方一致（同一个抽取正则、refsim 无噪声模拟、Hellinger 阈值 0.97、
+选后端答案集由 `backend_capabilities.json` 按约束算出而非写死）。另有 12 个进阶用例
+（加 `--stretch`）刻意超出题面难度，只用来找边界，不参与折算。
+
+Agent 内部是"生成 → 自验 → 不对就重试"的闭环，最多三次，偶发抽风不会直接变成失败；
+三次都不过会如实告知但仍把最好的一版交出来，不让用户空手而归。这里有个**反直觉的坑**：
+自验基准取错时，这个闭环会把正确答案改成错的（详见 `PLAN.md` 第四节陷阱 4）。所以
+族名标签与模型声明的分布冲突时，代码不擅自判决，而是带着用户原话做一次定向裁决。
 
 调不通时按这个顺序查：
 
 | 现象 | 处理 |
 |---|---|
 | 报缺少环境变量 | 变量名拼写，注意是 `LOOMQ_LLM_*` 前缀 |
+| HTTP 404 / 模型不存在 | base URL 少了 `/v1`，或该 key 下没开通这个模型；跑 `python tools/probe_agent_payload.py` 看原始返回 |
 | 超时 | 把 `LOOMQ_LLM_TIMEOUT_SECONDS` 调到 180 |
 | 模型返回的 QASM 抽不出来 | 看 `agent.py` 的 `_extract_json`；官方正则要求完整程序，不能夹解释文字 |
-| 自验总是三次都失败 | 大概率是模型太弱，换个更强的 model；`selftest_agent.py` 能证明是模型问题不是代码问题 |
+| 某个用例总是失败 | `python tools/probe_agent_payload.py "<那句 prompt>"` 会打印模型原始 payload 与自验依据，能直接看出是模型错了还是我们的基准错了 |
+| 自验总是三次都失败 | 大概率是模型太弱，换更强的 model；`selftest_agent.py` 能证明是模型问题不是代码问题 |
 
 ---
 
@@ -410,7 +432,7 @@ python starter_kit/prepare_submission.py --team-id <TEAM_ID>
 | `loomq/refsim.py` | 已验证，理想分布对上官方公开值 |
 | `loomq/decompose.py` | 已验证，`selftest_decompose.py` 22 项（含 crz 陷阱的数值反例） |
 | `loomq/visualize.py` `loomq/cli.py` | 已验证，`--demo` 端到端跑通，字符集自动降级 |
-| `loomq/agent.py` | 已验证，`selftest_agent.py` 36 项（本地假端点）；**待接真实模型** |
+| `loomq/agent.py` | **已接真实模型实测**，`selftest_agent.py` 42 项 + `selftest_l2_live.py` 对标组 24/24 |
 | `loomq/counts.py` | **已实测标定**：spinq/braket 原生位序都与约定相反，均需反转 |
 | `loomq/backends.py` braket / spinq | **已实测**，三处 `[待实测]` 全部关闭 |
 | `loomq/backends.py` originq | 已写，pyqpanda 未装，仍未验证，优先级低 |
@@ -423,7 +445,9 @@ python starter_kit/prepare_submission.py --team-id <TEAM_ID>
 **L1 入门档（12 分资格线）已经拿到**：`evaluator.py --level l1 --target spinq,braket`
 四个 case 全 PASS，退出码 0。
 
-剩下的：真实模型接 L2、量旋云真机、录演示视频、提交。
+**L2 客观分已实测达标**：对标组 24/24，折算 ≈ 20/20，远超"交互体验分计入"所需的 12 分线。
+
+剩下的：量旋云真机、找真人试 CLI、录演示视频。
 
 ## 附二：命令速查
 
@@ -439,7 +463,7 @@ $env:PYTHONIOENCODING = "utf-8"   # 否则中文输出在重定向时会乱码
 ```bash
 python tools/selftest_transpile.py                  # 转译层 37 项
 python tools/selftest_decompose.py                  # 门分解 22 项
-python tools/selftest_agent.py                      # L2 Agent 36 项
+python tools/selftest_agent.py                      # L2 Agent 42 项
 python tools/gen_circuits.py                        # 重新生成回归集 + 灵敏度检验
 python tools/run_regression.py                      # 回归集（参考模拟器）
 cd starter_kit && python -m loomq.cli --demo         # 零基础入口演示

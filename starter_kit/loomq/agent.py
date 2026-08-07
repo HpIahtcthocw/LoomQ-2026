@@ -133,13 +133,35 @@ qasm 硬性要求：
 - 以 OPENQASM 2.0; 和 include "qelib1.inc"; 开头
 - 必须声明 qreg 和 creg，必须有 measure 语句
 - 只允许使用这 12 个门：h, x, s, sdg, t, tdg, rz(θ), ry(θ), cx, cu1(θ), swap, ccx
-- 位串约定：最右边的字符对应 c[0]
 
-target_family 填法：
-- 贝尔态 / 两比特最大纠缠态 → "bell"
-- n 比特 GHZ 态 / n 比特最大纠缠态 → "ghz"，n_qubits 填 n
-- 所有比特的均匀叠加（每个比特各一个 H）→ "uniform"
-- 其他情况 → "custom"，此时 expected_distribution 必须准确填写
+位串与比特的对应关系（这是最容易出错的地方，务必逐位核对）：
+位串写作 c[n-1]…c[1]c[0]，**最右边的字符是 c[0]，最左边的字符是 c[n-1]**。
+举例，4 比特要让测量结果确定等于 "1100"，先逐位拆开：
+    c[3]=1, c[2]=1, c[1]=0, c[0]=0
+在默认的 measure q[i] -> c[i] 连线下，需要翻转的是 q[2] 和 q[3]，即 x q[2]; x q[3];
+写成 x q[0]; x q[1]; 会得到 "0011"，方向正好相反。
+
+用户用序数指代比特时（"第一个比特"、"第 1 位"）指的是 q[0]，它对应 c[0]，
+落在位串**最右边**那一位；"第二个比特"是 q[1]，落在右边第二位，依此类推。
+所以对某个指定比特施加的约束，写进位串时要从右往左数，不是从左往右数。
+
+用户明确列举了允许的测量结果时，必须严格按他给的位串设计电路，不要替换成你更熟悉的
+标准态。例如用户要"只能是 000 或 011"，那就不能给 000/111 的 GHZ 态——它们不是一回事。
+
+target_family 是给系统做自动校验用的标签，它必须精确对应测量分布，不是态的俗称。按下面
+的**分布**来填，不要按名字来填：
+
+- "bell"：**只**用于测量结果为 00 和 11 各一半的两比特态（即 |Φ+>）。
+- "ghz"：**只**用于测量结果为 全 0 和 全 1 各一半的 n 比特态，n_qubits 填 n。
+- "uniform"：**只**用于全部 2^n 种结果等概率的态。
+- "custom"：以上之外的一切情况，此时 expected_distribution 必须准确填写。
+
+特别注意：贝尔态有四个，GHZ 也有局部翻转与相位的变体。如果用户要的是 01 与 10 各一半、
+或带负号相位、或任何其他分布，即使它在物理上也叫"贝尔态"或"最大纠缠态"，target_family
+也必须填 "custom" 并写出真实的 expected_distribution。标签填错会让系统用错误的基准否决
+你正确的电路。
+
+无论填哪个族，只要你给了 expected_distribution，它就必须与你的电路真实测量分布一致。
 
 task="select_backend" 时返回：
 {
@@ -158,65 +180,145 @@ kind 填 "qpu" 仅当用户明确要求真实量子硬件；require_no_queue 为
 # --- 参考分布：尽量不采信模型的自我声明 --------------------------------------
 
 
-def reference_distribution(
-    family: str, n_qubits: int, declared: Optional[Dict[str, float]]
-) -> Tuple[Optional[Dict[str, float]], str]:
-    """给出用于判定的参考分布，并说明它的来源。
-
-    bell / ghz / uniform 由我们独立算出；custom 才回退到模型声明的分布。
-    """
+def canonical_from_family(family: str, n_qubits: int) -> Optional[Dict[str, float]]:
+    """由态族名推出规范分布。名字只能定到"族"，不能定到唯一成员，见下方注释。"""
     family = (family or "").strip().lower()
     if family == "bell":
-        return {"00": 0.5, "11": 0.5}, "独立推导（贝尔态）"
-    if family == "ghz" and n_qubits >= 2:
-        return {"0" * n_qubits: 0.5, "1" * n_qubits: 0.5}, "独立推导（GHZ-%d）" % n_qubits
+        return {"00": 0.5, "11": 0.5}
+    if family == "ghz" and 2 <= n_qubits <= 16:
+        return {"0" * n_qubits: 0.5, "1" * n_qubits: 0.5}
     if family == "uniform" and 1 <= n_qubits <= 16:
         size = 2**n_qubits
         weight = 1.0 / size
-        return {format(index, "0%db" % n_qubits): weight for index in range(size)}, \
-            "独立推导（%d 比特均匀叠加）" % n_qubits
-    if declared:
-        total = sum(declared.values())
-        if total > 0:
-            return {key: value / total for key, value in declared.items()}, "采信模型声明（custom）"
+        return {format(index, "0%db" % n_qubits): weight for index in range(size)}
+    return None
+
+
+def _normalized(declared: Optional[Dict[str, float]]) -> Optional[Dict[str, float]]:
+    if not declared:
+        return None
+    try:
+        total = sum(float(value) for value in declared.values())
+    except (TypeError, ValueError):
+        return None
+    if total <= 0:
+        return None
+    return {str(key): float(value) / total for key, value in declared.items()}
+
+
+def reference_distribution(
+    family: str, n_qubits: int, declared: Optional[Dict[str, float]]
+) -> Tuple[Optional[Dict[str, float]], str]:
+    """给出首选判定基准：族名能推导就用族名，否则回退到模型声明。
+
+    族名优先是有意的——它是我们唯一不依赖模型自我陈述的信号，能挡住"编个错电路再编个
+    配套的错期望"这种自洽性造假。但族名天生欠定（贝尔态有四个，GHZ 有局部翻转变体），
+    所以族名与声明冲突时不能直接判错，见 classify_verification。
+    """
+    canonical = canonical_from_family(family, n_qubits)
+    if canonical is not None:
+        label = (family or "").strip().lower()
+        if label == "ghz":
+            return canonical, "独立推导（GHZ-%d）" % n_qubits
+        if label == "uniform":
+            return canonical, "独立推导（%d 比特均匀叠加）" % n_qubits
+        return canonical, "独立推导（贝尔态 Φ+）"
+    normalized = _normalized(declared)
+    if normalized is not None:
+        return normalized, "采信模型声明（custom）"
     return None, "无参考分布，仅做可解析性与结构校验"
+
+
+PASS = "pass"
+LABEL_CONFLICT = "label_conflict"
+FAIL = "fail"
+
+
+def _describe(distribution: Dict[str, float], limit: int = 8) -> str:
+    """描述一个分布。会被送进裁决 prompt，所以截断时必须说明，否则均匀分布看起来会像不均匀。"""
+    ordered = sorted(distribution.items(), key=lambda kv: -kv[1])
+    shown = "、".join("%s:%.4f" % (key, value) for key, value in ordered[:limit])
+    if len(ordered) <= limit:
+        return "共 %d 个可能结果 —— %s" % (len(ordered), shown)
+    return "共 %d 个可能结果，概率最高的 %d 个是 %s（其余 %d 个概率更低或相同）" % (
+        len(ordered), limit, shown, len(ordered) - limit,
+    )
+
+
+def classify_verification(
+    qasm: str, family: str, n_qubits: int, declared: Optional[Dict[str, float]]
+) -> Tuple[str, str, Optional[float]]:
+    """三态自验。返回 (状态, 说明, 保真度)。
+
+    为什么需要第三种状态而不是简单的通过/不通过：族名与显式声明冲突时，有两种可能，
+    而它们在内部**结构上完全同形**，光靠代码分不开：
+
+      甲、族名是对的，电路错了，模型又编了一个与错电路自洽的假分布（真造假，该重试）。
+      乙、电路和分布都对，只是族名贴错了（例如 01/10 的纠缠态被标成 bell）。这时
+          否决它就会把正确答案改坏——这是实测踩到过的真实事故。
+
+    两者的唯一区分依据是**用户原话**，那不在这个函数的视野里。所以这里只负责如实报出
+    "冲突"，把裁决交给上层带着用户原始请求去做一次定向确认。
+    """
+    try:
+        circuit = parse(qasm)
+    except Exception as exc:  # noqa: BLE001
+        return FAIL, "无法解析：%s: %s" % (type(exc).__name__, exc), None
+
+    if not circuit.measures():
+        return FAIL, "电路里没有 measure 语句，测不出任何结果", None
+
+    width = n_qubits or circuit.n_qubits
+    canonical = canonical_from_family(family, width)
+    normalized = _normalized(declared)
+    actual = ideal_distribution(circuit)
+
+    if canonical is not None:
+        fidelity = hellinger_fidelity(actual, canonical)
+        if fidelity >= FIDELITY_THRESHOLD:
+            return PASS, "保真度 %.4f，基准由族名独立推导" % fidelity, fidelity
+        if normalized is not None:
+            declared_fidelity = hellinger_fidelity(actual, normalized)
+            if declared_fidelity >= FIDELITY_THRESHOLD:
+                return (
+                    LABEL_CONFLICT,
+                    "电路与模型自己声明的分布一致（保真度 %.4f，%s），"
+                    "但与族名 \"%s\" 推导出的基准只有 %.4f（%s）。族名和声明有一个是错的。"
+                    % (declared_fidelity, _describe(normalized), family, fidelity, _describe(canonical)),
+                    declared_fidelity,
+                )
+        return (
+            FAIL,
+            "保真度只有 %.4f（阈值 %.2f）。按族名 \"%s\" 应主要落在 %s，"
+            "但这个电路实际主要落在 %s"
+            % (fidelity, FIDELITY_THRESHOLD, family,
+               sorted(canonical, key=lambda key: -canonical[key])[:4],
+               [key for key, _ in sorted(actual.items(), key=lambda kv: -kv[1])[:4]]),
+            fidelity,
+        )
+
+    if normalized is not None:
+        fidelity = hellinger_fidelity(actual, normalized)
+        if fidelity >= FIDELITY_THRESHOLD:
+            return PASS, "保真度 %.4f，基准来自模型声明（custom）" % fidelity, fidelity
+        return (
+            FAIL,
+            "保真度只有 %.4f（阈值 %.2f）。声明期望落在 %s，但电路实际落在 %s"
+            % (fidelity, FIDELITY_THRESHOLD,
+               sorted(normalized, key=lambda key: -normalized[key])[:4],
+               [key for key, _ in sorted(actual.items(), key=lambda kv: -kv[1])[:4]]),
+            fidelity,
+        )
+
+    return PASS, "结构校验通过（无参考分布，仅校验可解析性与 measure）", None
 
 
 def verify_qasm(
     qasm: str, family: str, n_qubits: int, declared: Optional[Dict[str, float]]
 ) -> Tuple[bool, str, Optional[float]]:
-    """自验：先解析（挡语法与非白名单门），再用 refsim 比对参考分布。"""
-    try:
-        circuit = parse(qasm)
-    except Exception as exc:  # noqa: BLE001
-        return False, "无法解析：%s: %s" % (type(exc).__name__, exc), None
-
-    if not circuit.measures():
-        return False, "电路里没有 measure 语句，测不出任何结果", None
-
-    reference, source = reference_distribution(family, n_qubits or circuit.n_qubits, declared)
-    if reference is None:
-        return True, "结构校验通过（%s）" % source, None
-
-    actual = ideal_distribution(circuit)
-    fidelity = hellinger_fidelity(actual, reference)
-    if fidelity >= FIDELITY_THRESHOLD:
-        return True, "保真度 %.4f，基准来自%s" % (fidelity, source), fidelity
-
-    top = sorted(actual.items(), key=lambda kv: -kv[1])[:4]
-    return (
-        False,
-        "保真度只有 %.4f（阈值 %.2f）。基准来自%s，期望主要落在 %s，"
-        "但这个电路实际主要落在 %s"
-        % (
-            fidelity,
-            FIDELITY_THRESHOLD,
-            source,
-            sorted(reference, key=lambda key: -reference[key])[:4],
-            [key for key, _ in top],
-        ),
-        fidelity,
-    )
+    """布尔版自验。冲突按不通过处理，交由上层裁决。"""
+    status, reason, fidelity = classify_verification(qasm, family, n_qubits, declared)
+    return status == PASS, reason, fidelity
 
 
 # --- 三类任务的应答 ---------------------------------------------------------
@@ -239,6 +341,50 @@ def _format_circuit_reply(payload: Dict[str, Any], note: str) -> str:
     return "\n".join(lines)
 
 
+ADJUDICATION_PROMPT = """判断下面这个电路的测量分布是否就是用户想要的。
+
+用户的原始请求：
+%s
+
+这个电路实际的测量分布（由无噪声模拟精确算出，位串最右边是 c[0]）：
+%s
+
+只返回一个 JSON 对象，不要解释：
+{"matches_user_request": true 或 false, "why": "一句话理由"}
+
+只看分布本身是否满足用户的要求，不要在意用户或别人给这个态起的名字叫什么。"""
+
+
+def adjudicate_label_conflict(prompt: str, payload: Dict[str, Any]) -> bool:
+    """族名与声明分布冲突时的裁决：拿电路的**真实**分布去问用户原始请求是否被满足。
+
+    关键是这里问的不是"你贴的标签对不对"，而是把 refsim 精确算出的实际分布摆出来，问它
+    是否满足用户原话。分布是我们独立算的，模型无从粉饰；同时"用户原话"这个唯一的外部
+    基准也被带进来了，正好补上 classify_verification 缺的那块信息。
+
+    任何异常都返回 False，退回正常重试路径——裁决只用来救回正确答案，不用来放宽标准。
+    """
+    try:
+        circuit = parse(str(payload.get("qasm") or ""))
+        actual = ideal_distribution(circuit)
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        verdict = _extract_json(
+            _chat(
+                [
+                    {
+                        "role": "user",
+                        "content": ADJUDICATION_PROMPT % (prompt.strip(), _describe(actual)),
+                    }
+                ]
+            )
+        )
+    except Exception:  # noqa: BLE001
+        return False
+    return verdict.get("matches_user_request") is True
+
+
 def handle_circuit_task(prompt: str, first: Dict[str, Any]) -> str:
     """意图生成与代码纠错共用一条"生成 → 自验 → 带反馈重试"的闭环。"""
     payload = first
@@ -248,19 +394,28 @@ def handle_circuit_task(prompt: str, first: Dict[str, Any]) -> str:
         {"role": "assistant", "content": json.dumps(payload, ensure_ascii=False)},
     ]
     last_reason = ""
+    # 重试有可能越改越差，所以留住历史最优版本，最后交出去的是它而不是最后一版。
+    best_payload = payload
+    best_fidelity = -1.0
 
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         qasm = str(payload.get("qasm") or "")
-        ok, reason, _ = verify_qasm(
+        status, reason, fidelity = classify_verification(
             qasm,
             str(payload.get("target_family") or "custom"),
             int(payload.get("n_qubits") or 0),
             payload.get("expected_distribution"),
         )
-        if ok:
+        if status == PASS:
             note = "" if attempt == 1 else "（第 %d 次尝试通过自验）" % attempt
             return _format_circuit_reply(payload, note)
 
+        if status == LABEL_CONFLICT and adjudicate_label_conflict(prompt, payload):
+            note = "（族名标签与分布不一致，已按你的原始要求确认电路正确）"
+            return _format_circuit_reply(payload, note)
+
+        if fidelity is not None and fidelity > best_fidelity:
+            best_fidelity, best_payload = fidelity, payload
         last_reason = reason
         if attempt == MAX_GENERATION_ATTEMPTS:
             break
@@ -270,7 +425,10 @@ def handle_circuit_task(prompt: str, first: Dict[str, Any]) -> str:
                 "role": "user",
                 "content": "你上一版的电路没有通过自动验证：%s\n"
                 "请修正后重新返回同样格式的 JSON。保持用户原本声明的目标不变，"
-                "只允许使用 12 门白名单，并确认 measure 覆盖了所有相关比特。" % reason,
+                "只允许使用 12 门白名单，并确认 measure 覆盖了所有相关比特。\n"
+                "如果你认为上一版电路其实是对的，只是 target_family 这个标签不准确"
+                "（例如把 01/10 的纠缠态标成了 bell），那就保留电路不动，"
+                "改成 target_family=\"custom\" 并把 expected_distribution 填成真实分布。" % reason,
             }
         )
         try:
@@ -280,9 +438,9 @@ def handle_circuit_task(prompt: str, first: Dict[str, Any]) -> str:
             break
         history.append({"role": "assistant", "content": json.dumps(payload, ensure_ascii=False)})
 
-    # 仍未通过：如实说明，但仍然把最后一版电路交出去，避免整个 case 拿不到任何东西
+    # 仍未通过：如实说明，但仍然把最好的一版交出去，避免整个 case 拿不到任何东西
     note = "注意：这一版没有通过我的自动验证（%s）。它仍可运行，但结果可能与你的预期不同。" % last_reason
-    return _format_circuit_reply(payload, note)
+    return _format_circuit_reply(best_payload, note)
 
 
 _QUEUE_TEXT = {
