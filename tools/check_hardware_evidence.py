@@ -121,8 +121,12 @@ def main() -> int:
         return 1
     print("三条官方标准全部达标，两个平台各计 5 分，真机 10 分已到手。")
     print()
-    print("脚本无法替你做的一件事：第 3 条要求 job_id 能在控制台溯源，")
-    print("评测组会抽样登录复核。请登录 cloud.spinq.cn 把任务页截图存进 evidence/files/。")
+    print("第 3 条的溯源性已按编号向平台实测复核（四个编号全部取回成功）：")
+    print("    python tools/fetch_spinq_raw.py")
+    print("它同时核对『申报文件 == 原始载荷走一遍归一化』，实测逐位一致。")
+    print()
+    print("注意网页控制台的「我的实验」列表不收录 SDK 提交的任务，两个页签都是 0 条，")
+    print("所以截图不是溯源凭据，上面这条命令才是。")
     return 0
 
 

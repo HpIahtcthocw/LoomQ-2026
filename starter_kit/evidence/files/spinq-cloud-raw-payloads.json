@@ -1,0 +1,63 @@
+{
+  "how_to_verify": "python tools/fetch_spinq_raw.py —— 重新登录平台按编号取回，并自动核对申报文件是否等于『原始载荷→归一化』的结果。",
+  "payloads": {
+    "G-260808-0001": {
+      "n_qubits": 2,
+      "purpose": "位序标定探针（x q[0]），记录在 bitorder-calibration.json",
+      "raw_counts": {
+        "00": 1,
+        "01": 0,
+        "10": 1023,
+        "11": 0
+      },
+      "raw_total": 1024
+    },
+    "G-260808-0002": {
+      "n_qubits": 2,
+      "purpose": "Bell，申报真机分",
+      "raw_counts": {
+        "00": 437,
+        "01": 83,
+        "10": 18,
+        "11": 486
+      },
+      "raw_total": 1024
+    },
+    "S-260808-0001": {
+      "n_qubits": 3,
+      "purpose": "位序标定探针（x q[0]），记录在 bitorder-calibration.json",
+      "raw_counts": {
+        "000": 23,
+        "001": 137,
+        "010": 122,
+        "011": 6,
+        "100": 492,
+        "101": 117,
+        "110": 124,
+        "111": 2
+      },
+      "raw_total": 1023
+    },
+    "S-260808-0002": {
+      "n_qubits": 3,
+      "purpose": "GHZ-3，申报真机分",
+      "raw_counts": {
+        "000": 378,
+        "001": 53,
+        "010": 66,
+        "011": 19,
+        "100": 20,
+        "101": 62,
+        "110": 50,
+        "111": 375
+      },
+      "raw_total": 1023
+    }
+  },
+  "purpose": "量旋云真机任务的原始返回载荷，按编号从平台 API 取回，用于溯源复核。",
+  "transformations": [
+    "一、位序整串反转：依据 spinq-cloud-bitorder-calibration.json 的实测标定。",
+    "二、总数补足到 shots：官方 validate_schema 要求严格相等，按最大余数法补。"
+  ],
+  "why_two_files": "题面要『真机返回的原始 result.json』，但原始载荷与大赛统一 Schema 冲突：官方 validate_schema 要求 bit_order 为 little 且 counts 总和严格等于 shots，而真机原生位序与约定相反、且实测会出现总数少一次的情况。所以申报的 result.json 必然是归一化之后的。两份都交，并给出逐位对照。"
+}

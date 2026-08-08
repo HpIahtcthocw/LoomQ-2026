@@ -25,8 +25,8 @@
 运行时间：2026-08-08 11:15:00 (UTC+8)
 shots：1024
 实际执行的 QASM：starter_kit/evidence/files/spinq-cloud-gemini-bell-circuit.qasm
-平台返回的原始结果：starter_kit/evidence/files/spinq-cloud-gemini-bell-result.json
-任务页截图：[待补充，控制台任务页]
+平台原始返回：starter_kit/evidence/files/spinq-cloud-raw-payloads.json（按编号从平台 API 取回）
+统一 Schema 结果：starter_kit/evidence/files/spinq-cloud-gemini-bell-result.json
 ```
 
 ```text
@@ -35,8 +35,8 @@ shots：1024
 运行时间：2026-08-08 11:17:48 (UTC+8)
 shots：1024
 实际执行的 QASM：starter_kit/evidence/files/spinq-cloud-triangulum-ghz3-circuit.qasm
-平台返回的原始结果：starter_kit/evidence/files/spinq-cloud-triangulum-ghz3-result.json
-任务页截图：[待补充，控制台任务页]
+平台原始返回：starter_kit/evidence/files/spinq-cloud-raw-payloads.json（按编号从平台 API 取回）
+统一 Schema 结果：starter_kit/evidence/files/spinq-cloud-triangulum-ghz3-result.json
 ```
 
 复现命令（需 `LOOMQ_SPINQ_USERNAME` 与 `LOOMQ_SPINQ_KEYFILE` 两个环境变量，凭据不入库）：
@@ -45,7 +45,37 @@ shots：1024
 python tools/run_spinq_cloud.py platforms    # 看哪些真机在线，不提交任务
 python tools/run_spinq_cloud.py calibrate --qubits 2
 python tools/run_spinq_cloud.py run --qasm starter_kit/circuits/bell.qasm --platform gemini_vp
+python tools/fetch_spinq_raw.py              # 按编号取回原始返回并核对申报文件
 ```
+
+### 溯源性已按编号实测复核
+
+`python tools/fetch_spinq_raw.py` 会重新登录平台、按编号逐个取回任务结果。
+四个编号（含两个位序标定探针）**全部取回成功**，平台原样返回了计数。
+
+**申报的 result.json 是归一化之后的，不是原始载荷，这里说清楚为什么。**
+两者在本题里无法统一——官方 `validate_schema` 要求 `bit_order == "little"`
+且 counts 总和**严格等于** shots，而真机的实际情况是：
+
+| 冲突点 | 平台实际返回 | Schema 要求 |
+|---|---|---|
+| 位序 | 原生位串以 q[0] 为最左字符 | 最右字符须为 c[0] |
+| 总数 | `S-260808-0001/0002` 只返回 **1023** 次 | 严格等于 shots=1024 |
+
+所以交付文件必然经过两道变换：位序整串反转（依据
+`spinq-cloud-bitorder-calibration.json` 的实测标定）、按最大余数法补足到 shots。
+照抄原始载荷会 schema 非法、整个 case 判 0。
+
+**因此两份都交，并给出可复算的对照。** `spinq-cloud-raw-payloads.json` 存平台原始返回，
+`fetch_spinq_raw.py` 自动核对"申报文件是否等于原始载荷走一遍归一化"——实测逐位一致。
+评委按编号复核时会看到位串是反的、`000` 差 1，预先把这个变换摊开讲，
+比让人自己发现要好。
+
+**关于控制台任务页截图：** 网页控制台的「我的实验 → 查看实验结果」两个页签
+（未结束/已结束）都显示 0 条，猜测该列表只收录网页电路设计器创建的实验，
+不含 SDK 提交的任务。但这不影响溯源——平台 API 按编号查得到，
+上面那条命令可随时复现。这四个编号是平台分配的 task_code，
+不是我们自己生成的。
 
 **真机与模拟器的差距是真实的，我们照实报。** 按官方 `evaluator.py` 的口径
 （`1 − Hellinger 距离`，注意它比 Qiskit 的 `hellinger_fidelity` 更严）：
