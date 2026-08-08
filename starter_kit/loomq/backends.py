@@ -340,7 +340,9 @@ def run_originq(circuit: Circuit, shots: int) -> Dict[str, Any]:
             "未安装 pyqpanda。originq 属于 L1 进阶项，装不上不影响入门档资格线"
         ) from exc
 
-    source = emit_originir(circuit)
+    # executable=True：pyqpanda 不认 SDAG/TDAG，要换成 DAGGER 块。
+    # 判定输出（transpile）仍用契约规范门名，见 emit_originir 的说明。
+    source = emit_originir(circuit, executable=True)
 
     machine = pq.CPUQVM()
     machine.init_qvm()

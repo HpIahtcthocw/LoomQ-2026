@@ -143,8 +143,9 @@ python tools/selftest_l2_live.py --stretch  # 另加 12 个刻意超纲的进阶
 干净环境中的构建和启动命令：
   Python 3.10 环境下：
     pip install -r starter_kit/requirements.txt
-    cd starter_kit && python evaluator.py --level l1 --target spinq,braket
-  已实测通过：4/4 case PASS。requirements.txt 为全量精确锁定（66 行 ==），
+    cd starter_kit && python evaluator.py --level l1 --target spinq,braket,originq
+  已实测通过：6/6 case PASS（三个平台各两个公开电路）。
+  requirements.txt 为全量精确锁定（79 行 ==），
   并在干净的 3.10 venv 里 dry-run 验证过依赖可解。
   完整步骤见仓库根目录 RUNBOOK.md（九个步骤，每步都有明确通过判据）
   最小验证（无需任何第三方依赖，也不需要 API key，全部约 10 秒）：
@@ -174,10 +175,32 @@ python tools/selftest_l2_live.py --stretch  # 另加 12 个刻意超纲的进阶
 
 跨平台一致性的实测证据：
   自造的 6 个隐藏电路（GHZ-5 / QFT-4 / Grover-3 / Random×3，覆盖全部 12 门）
-  在 spinq 与 braket 两个后端上，与参考模拟器精确算出的理想分布相比，
-  保真度全部 >= 0.989（官方阈值 0.97），命令：
-    python tools/run_regression.py --target spinq,braket
+  在 spinq / braket / originq 三个后端上，与参考模拟器精确算出的理想分布相比，
+  18 个组合保真度全部 >= 0.987（官方阈值 0.97），命令：
+    python tools/run_regression.py --target spinq,braket,originq
   这比只跑公开的 bell/ghz3 强得多——后两者分布回文对称，位序写反了也照样 PASS。
+
+"通用中间层"是否名副其实，接第三个平台时得到了检验（可现场问询）：
+  接 originq 只改了两个地方——emitters.py 的 OriginIR 门名表与语法，
+  以及 backends.py 里那一个 run_originq 函数。IR、解析器、分解、
+  位序归一化、可视化、CLI、Agent 一行未动。这是架构解耦的直接证据，
+  不是三套硬编码分支。
+  过程中暴露三处"契约允许但 SDK 不接受"的写法，都只在真跑时现形：
+    RY(1.5708) q[0]      -> 报 no viable alternative，要写 RY q[0],(1.5708)
+    CU1 q[0],q[1],(θ)    -> 报 CU1 undefined，要写 CR
+    SDAG q[0]            -> 报 SDAG undefined，要用 DAGGER/S/ENDDAGGER 块
+  前两处契约明写两种写法都接受，故统一用能真跑的那种。
+  第三处 DAGGER 是结构而非门名、不在契约允许清单里，所以 emit_originir 加了
+  executable 参数：判定输出仍发 SDAG/TDAG，只有执行路径发 DAGGER 块——
+  与 braket「判定发 stdgates、执行发方言」同一个模式。
+
+  顺带用实测关掉了一个此前只能存疑的问题：OriginIR 的 CR 究竟是 cu1 还是 crz。
+  tools/probe_originir.py 用一个能区分二者的电路比对（bell/ghz 完全区分不开），
+  与 cu1 保真度 0.9988、与 crz 只有 0.7233，CR 就是 cu1 语义 diag(1,1,1,e^{iθ})。
+  QFT-4 在 originq 上 0.9953 也印证了这一点：若 CR 是 crz，它会掉到 0.72 附近。
+
+  位序同样逐个实测标定，未沿用别家结论：originq 原生位序与大赛约定一致，
+  而 spinq/braket/真机都相反。假定"同类平台约定相同"在这里就会出错。
 
 L2 自验闭环的一处非平凡设计（可现场问询）：
   "生成 → 自验 → 不对就重试"这个推荐方案有个反直觉的失效模式——自验基准取错时，

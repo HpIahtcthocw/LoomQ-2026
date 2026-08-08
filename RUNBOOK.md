@@ -275,15 +275,43 @@ git push origin main
 
 两件事，按顺序：
 
-**7a. 加第三个平台 originq**
+**7a. 加第三个平台 originq —— 本机已做完**
 
 ```bash
 pip install pyqpanda
+python tools/probe_originir.py                  # 实测语法与门语义，装完先跑这个
 python tools/probe_bitorder.py --target originq
+python tools/run_regression.py --target originq
 cd starter_kit && python evaluator.py --level l1 --target spinq,braket,originq && cd ..
 ```
 
-`backends.run_originq` 里的 pyqpanda 调用**尚未实测**，报错把完整堆栈贴给我。装不上就跳过。
+**通过判据**：回归六个电路全 PASS，evaluator 输出 `{"passed": 6, "failed": 0}`。
+本机实测三后端 18 个组合保真度全部 ≥0.987。
+
+`pyqpanda` 3.8.5 不引入冲突：装它时**现有包一个都没被改版或移除**，只新增 14 个。
+`pycryptodomex`（gmssl 依赖）与 spinqit 用的 `pycryptodome` 是不同顶层命名空间，可共存。
+
+**这一步暴露了三处错，都符合契约字面描述但 pyqpanda 全不接受**，
+只在真跑时现形，读文档发现不了：
+
+| 原先发的 | pyqpanda 的反应 | 实际要发 |
+|---|---|---|
+| `RY(1.5708) q[0]` | `no viable alternative at input 'RY('` | `RY q[0],(1.5708)` — 参数在操作数**之后** |
+| `CU1 q[0],q[1],(θ)` | `UserDefinedGate CU1 undefined` | `CR q[0],q[1],(θ)` |
+| `SDAG q[0]` | `UserDefinedGate SDAG undefined` | `DAGGER` / `S q[0]` / `ENDDAGGER` 块 |
+
+前两处契约都写明两种写法/门名都接受（`RY(θ) q[0]` 与 `RY q[0],(θ)`、`CU1/CR`），
+所以统一用能真跑的那种，两边成立。第三处不行——`DAGGER` 是结构而非门名，
+不在契约允许门名清单里，所以 `emit_originir` 加了 `executable` 参数：
+判定输出仍发 `SDAG`/`TDAG`，只有执行路径发 `DAGGER` 块。
+和 braket「判定发 stdgates、执行发方言」同一个模式。
+
+**`CR` 的语义已实测确认是 `cu1` 而非 `crz`**（这一条以前是待确认项）：
+`probe_originir.py` 用能区分二者的电路比对，与 `cu1` 保真度 0.9988、
+与 `crz` 只有 0.7233。QFT-4 在 originq 上 0.9953 也印证了——若 `CR` 是 `crz`，
+按步骤 7 下面那段实测它会掉到 0.72 附近。
+
+位序实测标定：**originq 与约定一致（`True`）**，与 spinq/braket 都相反。
 
 **7b. 隐藏电路回归**
 
@@ -494,26 +522,25 @@ python starter_kit/prepare_submission.py --team-id <TEAM_ID>
 | `loomq/decompose.py` | 已验证，`selftest_decompose.py` 22 项（含 crz 陷阱的数值反例） |
 | `loomq/visualize.py` `loomq/cli.py` | 已验证，`--demo` 端到端跑通，字符集自动降级；`selftest_explain.py` 35 项 |
 | `loomq/agent.py` | **已接真实模型实测**，`selftest_agent.py` 42 项 + `selftest_l2_live.py` 对标组 24/24 |
-| `loomq/counts.py` | **已实测标定**：spinq/braket/真机原生位序都与约定相反，均需反转 |
+| `loomq/counts.py` | **已实测标定**：spinq/braket/真机需反转，**originq 与约定一致** |
 | `loomq/backends.py` braket / spinq | **已实测**，三处 `[待实测]` 全部关闭 |
 | `loomq/backends.py` spinq_cloud（真机） | **已实测**，两个平台各跑通，CLI `--backend spinq_cloud` 端到端验证 |
-| `loomq/backends.py` originq | 已写，pyqpanda 未装，仍未验证，优先级低 |
-| `regression/` 回归集 | **已实测**，6 电路 × 2 后端保真度 ≥0.989 全 PASS |
+| `loomq/backends.py` originq | **已实测**，改掉三处 OriginIR 语法/门名错误后全过 |
+| `regression/` 回归集 | **已实测**，6 电路 × **3** 后端共 18 组合保真度 ≥0.987 全 PASS |
 | `adapter.py` transpile / run | 已接通，L1 公开自测四个 case 全 PASS |
 | `adapter.py` agent_chat（L2） | 已接通，委托 `loomq.agent` |
 | `adapter.py` compile_hybrid（L3） | 放弃 |
 | `starter_kit/requirements.txt` | **已锁定**，65 包全量 freeze，干净环境 dry-run 验证可解 |
 
-**L1 入门档（12 分资格线）已经拿到**：`evaluator.py --level l1 --target spinq,braket`
-四个 case 全 PASS，退出码 0。
+**L1 三个平台全部打通**：`evaluator.py --level l1 --target spinq,braket,originq`
+六个 case 全 PASS，退出码 0。12 分资格线早已拿到，现在在往进阶档（至 35 分）走。
 
 **L2 客观分已实测达标**：对标组 24/24，折算 ≈ 20/20，远超"交互体验分计入"所需的 12 分线。
 
 **真机 10 分已拿满**：`gemini_vp` 与 `triangulum_vp` 两个平台，
 `check_hardware_evidence.py` 按官方三条标准核验全达标。
 
-剩下的：控制台任务页截图（只能人工，护住已得的 10 分）、找真人试 CLI、
-录演示视频、pyqpanda（L1 进阶，12 → 35 的唯一途径，也是剩余最大的分数杠杆）。
+剩下的：控制台任务页截图（只能人工，护住已得的 10 分）、找真人试 CLI、录演示视频。
 
 ## 附二：命令速查
 
@@ -540,9 +567,10 @@ cd starter_kit && python -m loomq.cli --demo         # 零基础入口演示
 必须在 `.venv`（3.10 + SDK）里跑：
 
 ```bash
-python tools/probe_bitorder.py                             # 位序标定
-python tools/run_regression.py --target spinq,braket       # 回归集（真实后端）
-cd starter_kit && python evaluator.py --level l1 --target spinq,braket
+python tools/probe_bitorder.py                                     # 位序标定
+python tools/probe_originir.py                                     # OriginIR 语法与门语义实测
+python tools/run_regression.py --target spinq,braket,originq       # 回归集（真实后端）
+cd starter_kit && python evaluator.py --level l1 --target spinq,braket,originq
 cd starter_kit && python -m loomq.cli --backend braket --demo
 ```
 

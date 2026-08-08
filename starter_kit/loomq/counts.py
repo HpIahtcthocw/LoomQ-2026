@@ -21,7 +21,10 @@ from typing import Dict, Mapping, Optional
 NATIVE_MATCHES_CONTEST: Dict[str, Optional[bool]] = {
     "spinq": False,
     "braket": False,
-    "originq": None,  # 未装 pyqpanda，未标定
+    # 2026-08-08 实测标定（pyqpanda 3.8.5）：originq 原生位序**与约定一致**，
+    # 与 spinq/braket 相反。这正是必须逐个标定、不能沿用别家结论的例子。
+    # 两个非对称探针（2 比特翻 q[0] 得 "01"、3 比特翻 q[0]+q[1] 得 "011"）结论一致。
+    "originq": True,
     # 真机与本地模拟器是两条独立代码路径，位序不能想当然沿用 spinq 的结论：
     # 云端拒绝显式 measure、自行在末尾全测量，映射关系由平台决定而非我们的 measure 语句。
     # 2026-08-08 真机实测标定（gemini_vp 任务 G-260808-0001，triangulum_vp 任务

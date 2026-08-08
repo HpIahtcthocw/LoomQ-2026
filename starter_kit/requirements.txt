@@ -18,20 +18,27 @@
 #     default-simulator>=1.27.0，实际却会 import VerbatimBoxDelimiter ——
 #     那个符号 1.27.0 里没有，直接 ImportError。声明的下界不等于真实兼容性。
 #
-# 已实测：本文件在 Python 3.10.11 上装出的环境，evaluator L1 四个 case 全 PASS，
-# 六个隐藏回归电路 × spinq/braket 两后端保真度均 >=0.989。
+#  4. pyqpanda 3.8.5 是第三个平台（本源 originq）。它没有引入任何冲突——
+#     实测装它时**没有一个现有包被改版或移除**，只新增 14 个包，
+#     其中 pycryptodomex 与 spinqit 用的 pycryptodome 是不同命名空间，不打架。
+#     wheel 覆盖 cp38–cp311，3.10 在范围内。
 #
-# 关于 Linux 可装性（已逐包核对 PyPI）：全部 65 个包在 linux/cp310 上都有
+# 已实测：本文件在 Python 3.10.11 上装出的环境，evaluator L1 六个 case 全 PASS
+# （bell/ghz3 × spinq/braket/originq），六个隐藏回归电路 × 三个后端共 18 个组合
+# 保真度均 >=0.987。
+#
+# 关于 Linux 可装性（已逐包核对 PyPI）：原有 65 个包在 linux/cp310 上都有
 # 现成 wheel，只有 antlr4-python3-runtime 与 python-constraint 需从 sdist 构建，
 # 二者都是纯 Python，不需要编译器，slim 镜像足够。
-#
-# pyqpanda（本源 originq）未列入：属 L1 进阶项，尚未验证，装不上不影响资格线。
+# pyqpanda 新引入的包里 librt / ast-serialize / cffi / cryptography / Cython
+# 均有 linux cp310 wheel，无需编译。
 
 amazon-braket-default-simulator==1.27.0
 amazon-braket-schemas==1.28.0
 amazon-braket-sdk==1.97.0
 annotated-types==0.8.0
 antlr4-python3-runtime==4.9.2
+ast_serialize==0.8.0
 autograd==1.5
 autoray==0.6.1
 backoff==2.2.1
@@ -40,23 +47,29 @@ boltons==26.1.0
 boto3==1.43.66
 botocore==1.43.66
 certifi==2026.7.22
+cffi==2.1.1
 charset-normalizer==3.4.9
 cloudpickle==2.2.1
 contourpy==1.3.2
+cryptography==50.0.0
 cycler==0.12.1
+Cython==3.2.9
 filelock==3.32.2
 fonttools==4.63.0
 fsspec==2026.7.0
 future==1.0.0
+gmssl==3.2.2
 idna==3.18
 igraph==0.9.10
 Jinja2==3.1.6
 jmespath==1.1.0
 joblib==1.5.3
 kiwisolver==1.5.0
+librt==0.15.0
 MarkupSafe==3.0.3
 matplotlib==3.10.9
 mpmath==1.3.0
+mypy==2.3.0
 mypy_extensions==1.1.0
 nest-asyncio==1.6.0
 networkx==3.4.2
@@ -67,13 +80,20 @@ openqasm3==1.0.1
 opt_einsum==3.4.0
 oqpy==0.3.10
 packaging==26.3
+pathspec==1.1.1
 pillow==12.3.0
 psutil==7.2.2
 pybind11==3.1.0
+pycparser==3.0
 pycryptodome==3.11.0
+# pycryptodomex 与上面的 pycryptodome 是**不同的顶层命名空间**
+# （Cryptodome vs Crypto），可以共存。gmssl 依赖前者，spinqit 依赖后者。
+pycryptodomex==3.23.0
 pydantic==2.13.4
 pydantic_core==2.46.4
+pydot==4.0.1
 pyparsing==3.3.2
+pyqpanda==3.8.5
 python-constraint==1.4.0
 python-dateutil==2.9.0.post0
 python-igraph==0.9.10
@@ -87,10 +107,12 @@ scipy==1.15.3
 # 不锁的话容器每次构建都可能装到不同版本，故显式钉住。
 setuptools==83.0.0
 six==1.17.0
+snowland-smx==1.0.0.post2
 spinqit==0.2.4
 sympy==1.14.0
 texttable==1.7.0
 threadpoolctl==3.6.0
+tomli==2.4.1
 torch==2.13.0
 typing-inspection==0.4.2
 typing_extensions==4.16.0
