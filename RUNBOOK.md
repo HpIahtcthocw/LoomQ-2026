@@ -178,23 +178,31 @@ cd ..
 
 ## 步骤 4 · 离线自测（不需要 SDK，不需要 API key，纯标准库）
 
-六条命令，加起来约 10 秒：
+八条命令，加起来约 20 秒：
 
 ```bash
 python tools/selftest_transpile.py     # 转译层，37 项
 python tools/selftest_decompose.py     # 门分解数值验证，22 项
 python tools/selftest_agent.py         # L2 Agent，42 项，用本地假端点
 python tools/selftest_explain.py       # 结果解释文案，35 项
+python tools/selftest_hybrid.py        # L3 混合编译，随机程序穷举注入差分
+python tools/selftest_quantum_ext.py   # 量子 RISC-V 扩展，七组端到端测试
 python tools/gen_circuits.py           # 重新生成隐藏电路回归集 + 灵敏度检验
 python tools/run_regression.py         # 回归集跑一遍参考模拟器
 ```
 
-**通过判据**：第 1、2、3、4、6 条最后一行都输出 `全部通过`，无任何 `[FAIL]`；
-第 5 条把 6 个电路与理想分布写进 `regression/`，且末尾报告
+**通过判据**：除 `gen_circuits.py` 外每条最后一行都输出 `全部通过`，无任何 `[FAIL]`；
+`gen_circuits.py` 把 6 个电路与理想分布写进 `regression/`，且末尾报告
 「相位错误探测器 4 个，位序错误探测器 4 个」——两个数都不能是 0。
 
-这五条在本机（Windows、无 SDK、无 key）已全部通过。在目标机器上重跑是为了确认
+这八条在本机（Windows、无 SDK、无 key）已全部通过。在目标机器上重跑是为了确认
 代码搬运完整、没有文件缺失、没有换行符或编码损坏。
+
+`selftest_hybrid.py` 想加压时可以调参数，默认 300 组够快，实测跑到 800 组也全过：
+
+```bash
+python tools/selftest_hybrid.py --programs 800 --seed 7
+```
 
 顺手确认零基础入口也是好的：
 
@@ -484,6 +492,50 @@ Agent 内部是"生成 → 自验 → 不对就重试"的闭环，最多三次�
 
 ---
 
+## 步骤 8.5 · L3 混合编译 + Bonus 扩展指令（15 + 8 分，本机已做完）
+
+**纯标准库，不需要 SDK 也不需要 API key。** 这一步在任何装了 Python 的机器上都能验。
+
+```bash
+python tools/selftest_hybrid.py          # L3：随机程序穷举注入差分
+python tools/selftest_quantum_ext.py     # Bonus：七组端到端测试
+python tools/riscv_quantum_emulator.py   # Bonus 最小演示
+cd starter_kit && python evaluator.py --level l3 && cd ..
+```
+
+**通过判据**：前两条末行 `全部通过`；第三条打印五行，每行的两个测量值**相等**
+且 `x1=1`；第四条 `[PASS] l3:public-branch`。
+
+`submission.yaml` 里 `l3` 必须是 `true`，否则 `evaluator.py` 默认跳过 L3。
+
+**别拿公开自测当信心来源。** `evaluator.py --level l3` 只有一个用例：
+单测量位、只用 `==`、只赋常量，不测 `+ -`、不测 `!=`、不测顺序赋值、不测嵌套，
+连量子序列内容都不检查（只看返回值是不是 `list`）。它全绿之后我们才发现
+**题面自己给的那段示例编译不过**——示例在 `classical {` 后面跟了 `//` 注释。
+真正的判据是 `selftest_hybrid.py`：它复刻官方判定方式（随机生成 + 穷举注入
++ 比对参考解释器），并且 8 个固定用例的期望值全部手算，独立于实现。
+
+想加压：
+
+```bash
+python tools/selftest_hybrid.py --programs 800 --seed 7
+```
+
+两个已知边界都固化成回归用例了（第六组），加压时如果重新触发，说明有人改坏了
+仿射式归一化那段：一是测量位多到挤占临时寄存器区（`c[k]` 映射到 x10+k），
+二是深嵌套把指令数顶过模拟器的 `max_steps=1000`。详见 PLAN.md 陷阱 8。
+
+相关文件：
+
+| 文件 | 作用 |
+|---|---|
+| `starter_kit/loomq/hybrid.py` | L3 主体：词法 → 递归下降 → AST → 代码生成，外加参考解释器 |
+| `docs/quantum-riscv-extension.md` | Bonus 交付物 ①：指令编码规格 |
+| `tools/riscv_quantum_emulator.py` | Bonus 交付物 ②：官方模拟器的 fork |
+| `tools/selftest_quantum_ext.py` | Bonus 交付物 ③：端到端测试 |
+
+---
+
 ## 步骤 9 · 提交（截止 2026-08-25 12:00 UTC+8）
 
 ```bash
@@ -529,7 +581,8 @@ python starter_kit/prepare_submission.py --team-id <TEAM_ID>
 | `regression/` 回归集 | **已实测**，6 电路 × **3** 后端共 18 组合保真度 ≥0.987 全 PASS |
 | `adapter.py` transpile / run | 已接通，L1 公开自测四个 case 全 PASS |
 | `adapter.py` agent_chat（L2） | 已接通，委托 `loomq.agent` |
-| `adapter.py` compile_hybrid（L3） | 放弃 |
+| `loomq/hybrid.py` + `adapter.py` compile_hybrid（L3） | **已完成**，`selftest_hybrid.py` 800 组随机程序穷举注入全过 |
+| `tools/riscv_quantum_emulator.py`（Bonus） | **已完成**，`selftest_quantum_ext.py` 七组全过 |
 | `starter_kit/requirements.txt` | **已锁定**，65 包全量 freeze，干净环境 dry-run 验证可解 |
 
 **L1 三个平台全部打通**：`evaluator.py --level l1 --target spinq,braket,originq`
@@ -539,6 +592,12 @@ python starter_kit/prepare_submission.py --team-id <TEAM_ID>
 
 **真机 10 分已拿满**：`gemini_vp` 与 `triangulum_vp` 两个平台，
 `check_hardware_evidence.py` 按官方三条标准核验全达标。
+
+**L3 与 Bonus 已完成**：`submission.yaml` 的 `l3` 已改为 `true`，
+`evaluator.py` 六个 case 全 PASS（含 `l3:public-branch`）。
+注意公开自测在 L3 上几乎没有鉴别力——只有一个用例，单测量位、只用 `==`、只赋常量，
+它全绿之后才发现题面自己给的示例编译不过（示例带 `//` 注释）。
+判信心要看 `selftest_hybrid.py`：那才是复刻官方判定方式的差分测试。
 
 剩下的：控制台任务页截图（只能人工，护住已得的 10 分）、找真人试 CLI、录演示视频。
 
@@ -558,6 +617,9 @@ python tools/selftest_transpile.py                  # 转译层 37 项
 python tools/selftest_decompose.py                  # 门分解 22 项
 python tools/selftest_agent.py                      # L2 Agent 42 项
 python tools/selftest_explain.py                    # 结果解释文案 35 项
+python tools/selftest_hybrid.py                     # L3 混合编译差分（--programs 加压）
+python tools/selftest_quantum_ext.py                # 量子 RISC-V 扩展七组测试
+python tools/riscv_quantum_emulator.py              # Bonus 最小演示：Bell 态驱动经典分支
 python tools/gen_circuits.py                        # 重新生成回归集 + 灵敏度检验
 python tools/run_regression.py                      # 回归集（参考模拟器）
 python tools/check_hardware_evidence.py             # 真机证据按官方三条标准核验

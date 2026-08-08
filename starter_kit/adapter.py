@@ -11,9 +11,9 @@
 from typing import Any, Dict, List, Tuple
 
 try:  # 评测器可能以 starter_kit 包导入，也可能以 starter_kit 为工作目录直接导入
-    from .loomq import agent, backends, emitters, parse
+    from .loomq import agent, backends, emitters, hybrid, parse
 except ImportError:  # pragma: no cover
-    from loomq import agent, backends, emitters, parse
+    from loomq import agent, backends, emitters, hybrid, parse
 
 
 SUPPORTED_TARGETS = ("spinq", "originq", "braket")
@@ -40,6 +40,4 @@ def agent_chat(prompt: str) -> str:
 
 def compile_hybrid(hybrid_qasm_str: str) -> Tuple[List[str], str]:
     """Optional L3 entry point. Return quantum operations and RISC-V assembly."""
-    raise NotImplementedError(
-        "L3 is optional; implement compile_hybrid(hybrid_qasm_str) to enter"
-    )
+    return hybrid.compile_hybrid(hybrid_qasm_str)
