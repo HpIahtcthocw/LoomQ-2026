@@ -1,0 +1,31 @@
+{
+  "purpose": "量旋云真机原生位序标定。大赛约定 counts 的 key 是 c[n-1]...c[1]c[0]，最右字符为 c[0]。中间层必须知道真机原生位序才能正确归一化。",
+  "method": "提交非对称探针电路：只对 q[0] 施加 x，其余比特保持 |0>。约定下正确结果应为 0..01（只有最右位是 1）；若返回 1..00 则说明原生位串以 q[0] 为最左字符，需要整串反转。bell/ghz 这类回文对称分布在这里无效——反转后完全一样，位序写反也照样 PASS。",
+  "note": "云平台拒绝显式 measure 语句，由平台在电路末尾自动全测量，因此真机位序与本地模拟器是两条独立代码路径，结论不能互相沿用，必须各自标定。",
+  "reproduce": "python tools/run_spinq_cloud.py calibrate --qubits 2   （以及 --qubits 3）",
+  "runs": [
+    {
+      "platform": "gemini_vp",
+      "job_id": "G-260808-0001",
+      "n_qubits": 2,
+      "shots": 1024,
+      "circuit": "x q[0];",
+      "contest_convention_expects": "01",
+      "raw_counts": {"00": 1, "01": 0, "10": 1023, "11": 0},
+      "dominant": "10",
+      "verdict": "原生位序与大赛约定相反，需反转"
+    },
+    {
+      "platform": "triangulum_vp",
+      "job_id": "S-260808-0001",
+      "n_qubits": 3,
+      "shots": 1024,
+      "circuit": "x q[0];",
+      "contest_convention_expects": "001",
+      "raw_counts": {"000": 23, "001": 137, "010": 122, "011": 6, "100": 492, "101": 117, "110": 124, "111": 2},
+      "dominant": "100",
+      "verdict": "原生位序与大赛约定相反，需反转。NMR 真机噪声可观（主峰 48%），但主峰无歧义"
+    }
+  ],
+  "conclusion": "NATIVE_MATCHES_CONTEST[\"spinq_cloud\"] = False。两个不同位宽、两个不同平台结论一致，排除了『自动测量整体错位』这一竞争解释——若是错位而非反序，2 比特与 3 比特的主峰不会同时落在整串反转的位置上。"
+}

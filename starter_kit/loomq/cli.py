@@ -22,6 +22,7 @@
     python -m loomq.cli --demo               # 三个现场体验任务，依次自动跑完
     python -m loomq.cli --ask "生成一个三比特的最大纠缠态"
     python -m loomq.cli --backend braket     # 指定真实后端；默认用内置参考模拟器
+    python -m loomq.cli --backend spinq_cloud  # 送到真实的量子计算机上跑
     python -m loomq.cli --list-backends      # 看有哪些后端可用
 """
 
@@ -35,12 +36,13 @@ from typing import Dict, Optional, Tuple
 
 from . import backends as backend_module
 from .qasm2_parser import QasmError, parse
-from .refsim import sample
+from .refsim import ideal_distribution, sample
 from .visualize import (
     bitstring_legend,
     circuit_diagram,
     display_width,
     explain_distribution,
+    explain_hardware_noise,
     histogram,
     pad,
 )
@@ -70,6 +72,14 @@ WELCOME = """
   3  在八个抽屉里找出正确的那个（Grover 搜索）
 
 输入 help 看更多命令，输入 quit 退出。
+"""
+
+# 真机可用时追加这一段。放在开场引导里而不是藏在 help 后面，是因为
+# 专项奖标准要求"在真实量子机上完成第一个实验"——用户得先知道这件事做得到。
+WELCOME_HARDWARE = """
+另外：这台机器已经接上了真实的量子计算机，不是模拟器。
+输入 real 就能把电路送到真机上跑（要排队，每次约两分钟），
+再输入 sim 可以切回模拟器对照着看。两边的差别本身就很值得一看。
 """
 
 # 没配模型 key 时的兜底示例库。评委不一定配了 LOOMQ_LLM_*，
@@ -162,6 +172,17 @@ def available_backends() -> Dict[str, bool]:
     return backend_module.available()
 
 
+def hardware_ready() -> bool:
+    """真机除了要装 SDK，还要有凭据。两者缺一都连不上，状态得如实区分。"""
+    keyfile = os.environ.get("LOOMQ_SPINQ_KEYFILE") or ""
+    return bool(
+        available_backends().get("spinq_cloud")
+        and os.environ.get("LOOMQ_SPINQ_USERNAME")
+        and keyfile
+        and os.path.isfile(keyfile)
+    )
+
+
 def describe_backends() -> str:
     installed = available_backends()
     labels = {
@@ -169,33 +190,83 @@ def describe_backends() -> str:
         "spinq": "量旋 SpinQit 本地模拟器",
         "braket": "AWS Braket LocalSimulator",
         "originq": "本源 pyqpanda 本地模拟器",
+        "spinq_cloud": "量旋云真实量子计算机（NMR 真机，需账号）",
     }
     label_width = max(display_width(text) for text in labels.values())
     lines = ["可用的运行后端：", ""]
     for target, label in labels.items():
         if target == "refsim":
             state = "[始终可用]"
+        elif target == "spinq_cloud":
+            state = "[可用]" if hardware_ready() else (
+                "[缺凭据]" if installed.get("spinq_cloud") else "[未安装]"
+            )
         else:
             state = "[已安装]" if installed.get(target) else "[未安装]"
-        lines.append("  %s %s %s" % (pad(target, 8), pad(label, label_width), state))
+        lines.append("  %s %s %s" % (pad(target, 12), pad(label, label_width), state))
     if not any(installed.values()):
         lines += ["", "当前没有装任何量子 SDK，会使用内置参考模拟器。",
                   "想接真实后端：在 Python 3.10 环境执行 pip install amazon-braket-sdk spinqit"]
+    if installed.get("spinq_cloud") and not hardware_ready():
+        lines += ["", "想真的跑在量子计算机上（前面全是模拟器）：",
+                  "  1. 到 https://cloud.spinq.cn 注册账号",
+                  "  2. 运行 python tools/make_spinq_key.py 生成密钥，把公钥贴到网站账号设置里",
+                  "  3. 设置环境变量 LOOMQ_SPINQ_USERNAME 和 LOOMQ_SPINQ_KEYFILE",
+                  "  4. python -m loomq.cli --backend spinq_cloud"]
     return "\n".join(lines)
 
 
-def run_circuit(qasm: str, target: str, shots: int) -> Tuple[Dict[str, int], str]:
-    """执行电路，返回 (counts, 实际使用的后端说明)。失败时抛出可读异常。"""
+def run_circuit(qasm: str, target: str, shots: int) -> Tuple[Dict[str, int], str, bool]:
+    """执行电路，返回 (counts, 后端说明, 是否真机)。
+
+    第三个返回值决定要不要额外解释真机噪声——真机结果里那些"不该出现"的位串，
+    不解释清楚会让新手以为自己做错了。
+    """
     circuit = parse(qasm)
     if target == "refsim":
-        return sample(circuit, shots), "内置参考模拟器"
+        return sample(circuit, shots), "内置参考模拟器", False
+    if target == "spinq_cloud":
+        return _run_on_hardware(circuit, shots)
     try:
         payload = backend_module.execute(circuit, target, shots)
-        return payload["counts"], "%s（job %s）" % (payload["backend"], payload["job_id"])
+        return payload["counts"], "%s（job %s）" % (payload["backend"], payload["job_id"]), False
     except backend_module.BackendUnavailable as exc:
         _print("  提示：%s" % exc)
         _print("  已自动改用内置参考模拟器，流程照常继续。")
-        return sample(circuit, shots), "内置参考模拟器（后端不可用时的兜底）"
+        return sample(circuit, shots), "内置参考模拟器（后端不可用时的兜底）", False
+
+
+def _run_on_hardware(circuit, shots: int) -> Tuple[Dict[str, int], str, bool]:
+    """真机路径。任何一步失败都回落到参考模拟器，绝不把用户卡在半路。"""
+    _print()
+    _print("  这一次要送到真实的量子计算机上运行，不是模拟器。")
+    try:
+        payload = backend_module.run_spinq_cloud(
+            circuit, shots, progress=lambda text: _print("  " + text)
+        )
+    except backend_module.SpinQCloudPending as exc:
+        _print("  %s" % exc)
+        _print("  任务编号 %s 已经存下，机器空出来后可以凭编号取回结果。" % exc.task_code)
+        _print("  现在先用内置模拟器给你看理想结果，好让流程走完。")
+        return sample(circuit, shots), "内置参考模拟器（真机仍在排队）", False
+    except backend_module.BackendUnavailable as exc:
+        _print("  连不上真机：%s" % exc)
+        if circuit.n_qubits > 3:
+            _print("  真实量子机现在还很小——在线的只有 2 比特和 3 比特两台。")
+            _print("  这不是你的电路有问题，而是真机的规模限制，也正是模拟器仍然重要的原因。")
+        _print("  已自动改用内置参考模拟器，流程照常继续。")
+        return sample(circuit, shots), "内置参考模拟器（真机不可用时的兜底）", False
+    except Exception as exc:  # noqa: BLE001
+        _print("  真机运行出了状况：%s: %s" % (type(exc).__name__, exc))
+        _print("  已自动改用内置参考模拟器，流程照常继续。")
+        return sample(circuit, shots), "内置参考模拟器（真机报错时的兜底）", False
+
+    return (
+        payload["counts"],
+        "真实量子计算机 %s（任务编号 %s，可在 cloud.spinq.cn 查到）"
+        % (payload["backend"], payload["job_id"]),
+        True,
+    )
 
 
 def present(title: str, qasm: str, explanation: str, target: str, shots: int) -> None:
@@ -227,7 +298,7 @@ def present(title: str, qasm: str, explanation: str, target: str, shots: int) ->
     _print()
     _print("正在运行，重复测量 %d 次..." % shots)
     try:
-        counts, backend_note = run_circuit(qasm, target, shots)
+        counts, backend_note, on_hardware = run_circuit(qasm, target, shots)
     except Exception as exc:  # noqa: BLE001
         _print()
         _print("运行失败：%s: %s" % (type(exc).__name__, exc))
@@ -247,10 +318,29 @@ def present(title: str, qasm: str, explanation: str, target: str, shots: int) ->
 
     total = sum(counts.values())
     distribution = {key: value / total for key, value in counts.items()}
-    _print()
-    _print("这意味着什么：")
-    for line in _wrap(explain_distribution(distribution, total), 62):
-        _print("  " + line)
+
+    if on_hardware:
+        # 真机结果被噪声糊过，光看它讲不清电路的意图，所以拿 refsim 精确算出理想分布
+        # 当基准：结构性解释讲理想的（电路本该做什么），偏差解释讲实测的（真机差在哪）。
+        ideal = ideal_distribution(circuit)
+        _print()
+        _print("这个电路本该给出的结果（内置模拟器精确计算）：")
+        _print()
+        for key in sorted(ideal, key=lambda item: -ideal[item]):
+            _print("  %s  %5.1f%%" % (key, ideal[key] * 100))
+        _print()
+        _print("这意味着什么：")
+        for line in _wrap(explain_distribution(ideal), 62):
+            _print("  " + line)
+        _print()
+        _print("那么真机差在哪：")
+        for line in _wrap(explain_hardware_noise(distribution, ideal), 62):
+            _print("  " + line)
+    else:
+        _print()
+        _print("这意味着什么：")
+        for line in _wrap(explain_distribution(distribution, total), 62):
+            _print("  " + line)
     _print()
 
 
@@ -293,6 +383,8 @@ HELP = """
 
   1 / 2 / 3          运行内置示例（贝尔态 / GHZ 态 / Grover 搜索）
   任意中文描述       交给智能体生成电路，例如：让四个比特全都纠缠起来
+  real               换成真实的量子计算机来跑（要排队，每次约两分钟）
+  sim                换回内置模拟器（立刻出结果，且是精确理想值）
   backends           查看有哪些运行后端
   shots 4096         修改重复测量次数
   intro              重看开场引导
@@ -303,6 +395,8 @@ HELP = """
 
 def interactive(target: str, shots: int) -> int:
     _print(WELCOME)
+    if target != "spinq_cloud" and hardware_ready():
+        _print(WELCOME_HARDWARE)
     while True:
         try:
             raw = input("你想做什么？> ").strip()
@@ -335,6 +429,26 @@ def interactive(target: str, shots: int) -> int:
                 _print("好，之后每次重复测量 %d 次。" % shots)
             else:
                 _print("用法：shots 4096")
+            continue
+        # 真机必须能在会话中途切换。否则默认进来是模拟器，用户（和评委）
+        # 走完整个流程都不会知道这个工具能连真实量子计算机。
+        if lowered in ("real", "真机"):
+            if hardware_ready():
+                target = "spinq_cloud"
+                _print()
+                _print("好，接下来的运行会送到真实的量子计算机上。")
+                _print("真机要排队，每次约两分钟；输入 sim 可以随时切回模拟器。")
+                _print()
+            else:
+                _print()
+                _print("真机还没配好，暂时用不了。缺的东西和步骤：")
+                _print()
+                _print(describe_backends())
+                _print()
+            continue
+        if lowered in ("sim", "模拟器"):
+            target = "refsim"
+            _print("好，切回内置模拟器，结果是精确的理想值，而且立刻就有。")
             continue
 
         if raw in BUILTIN_EXAMPLES:
@@ -379,8 +493,9 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument("--demo", action="store_true", help="依次运行三个现场体验任务")
     parser.add_argument("--list-backends", action="store_true", help="列出可用后端后退出")
     parser.add_argument("--backend", default="refsim",
-                        choices=("refsim", "spinq", "braket", "originq"),
-                        help="运行后端，默认 refsim（内置参考模拟器，始终可用）")
+                        choices=("refsim", "spinq", "braket", "originq", "spinq_cloud"),
+                        help="运行后端，默认 refsim（内置参考模拟器，始终可用）；"
+                             "spinq_cloud 是真实量子计算机")
     parser.add_argument("--shots", type=int, default=DEFAULT_SHOTS, help="重复测量次数")
     args = parser.parse_args(argv)
 

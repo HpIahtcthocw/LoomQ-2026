@@ -22,6 +22,14 @@ NATIVE_MATCHES_CONTEST: Dict[str, Optional[bool]] = {
     "spinq": False,
     "braket": False,
     "originq": None,  # 未装 pyqpanda，未标定
+    # 真机与本地模拟器是两条独立代码路径，位序不能想当然沿用 spinq 的结论：
+    # 云端拒绝显式 measure、自行在末尾全测量，映射关系由平台决定而非我们的 measure 语句。
+    # 2026-08-08 真机实测标定（gemini_vp 任务 G-260808-0001，triangulum_vp 任务
+    # S-260808-0001）：非对称探针 x q[0] 在 2 比特返回主峰 "10"（1023/1024）、
+    # 3 比特返回主峰 "100"（492/1024，NMR 真机噪声可观但主峰无歧义），
+    # 即原生位串以 q[0] 为最左字符，与大赛约定（最右为 c[0]）相反，需要反转。
+    # 两个宽度、两个平台结论一致，排除了"自动测量整体错位"这个干扰项。
+    "spinq_cloud": False,
 }
 
 

@@ -235,13 +235,35 @@ def explain_distribution(distribution: Mapping[str, float], n_shots: Optional[in
     parts: List[str] = []
 
     top_key, top_probability = ordered[0]
+
+    # 「主峰」而非「出现过的结果」是解释的正确单位：真机总会在本该为零的位置上
+    # 漏出几个百分点，若按 outcomes 判断，同一个贝尔态在模拟器上认得出纠缠、
+    # 在真机上就认不出了。
+    #
+    # 但主峰也不能按"占最高峰一半以上"这类固定比例来切——真机实测打穿过这个做法：
+    # 同一个贝尔态电路一次跑出 45%/44%，下一次跑出 59%/29%，后者会把 11 误判成噪声。
+    # 所以改为要求**清晰可分**：切点处前一名必须达到后一名的 3 倍以上。
+    # 分不清就不下结构性结论——宁可少说一句，也不说错。真机路径另有精确基准，
+    # 见 explain_hardware_noise 用 refsim 理想分布做对比。
+    SEPARATION = 3.0
+
+    def dominant_prefix() -> List[tuple]:
+        for size in range(1, outcomes):
+            if ordered[size - 1][1] >= SEPARATION * ordered[size][1]:
+                return ordered[:size]
+        return ordered
+
+    dominant = dominant_prefix()
+    dominant_keys = {key for key, _ in dominant}
+    has_noise = len(dominant) < outcomes
+
     if top_probability >= 0.85:
         parts.append(
             "结果高度集中：%.1f%% 的情况下都是 %s，几乎可以当成一个确定的答案。"
             % (top_probability * 100, top_key)
         )
-    elif outcomes == 2 and abs(ordered[0][1] - 0.5) < 0.05:
-        parts.append("只出现两种结果，各占大约一半——像抛一枚硬币，但两个答案都是合法的。")
+    elif len(dominant) == 2 and abs(dominant[0][1] - dominant[1][1]) < 0.1:
+        parts.append("主要就两种结果，各占大约一半——像抛一枚硬币，但两个答案都是合法的。")
     elif outcomes == possible and max(normalized.values()) - min(normalized.values()) < 0.02:
         parts.append(
             "%d 种可能的结果全都出现了，而且概率几乎相同——这是完全的均匀叠加，"
@@ -252,12 +274,20 @@ def explain_distribution(distribution: Mapping[str, float], n_shots: Optional[in
                      % (outcomes, possible, top_key, top_probability * 100))
 
     all_zero, all_one = "0" * width, "1" * width
-    if width >= 2 and outcomes == 2 and {all_zero, all_one} == set(normalized):
-        parts.append(
-            "注意中间那些结果（比如 %s、%s）一次都没出现：%d 个比特要么全是 0，要么全是 1，"
-            "从不各行其是。这就是「纠缠」——它们的命运被绑在了一起。"
-            % ("0" * (width - 1) + "1", "1" + "0" * (width - 1), width)
-        )
+    if width >= 2 and dominant_keys == {all_zero, all_one}:
+        middle = ("0" * (width - 1) + "1", "1" + "0" * (width - 1))
+        if has_noise:
+            parts.append(
+                "关键在于中间那些结果（比如 %s、%s）几乎不出现：%d 个比特要么全是 0，"
+                "要么全是 1，从不各行其是。这就是「纠缠」——它们的命运被绑在了一起。"
+                % (middle[0], middle[1], width)
+            )
+        else:
+            parts.append(
+                "注意中间那些结果（比如 %s、%s）一次都没出现：%d 个比特要么全是 0，"
+                "要么全是 1，从不各行其是。这就是「纠缠」——它们的命运被绑在了一起。"
+                % (middle[0], middle[1], width)
+            )
 
     missing = possible - outcomes
     if 0 < missing < possible and outcomes > 2 and top_probability < 0.85:
@@ -267,6 +297,72 @@ def explain_distribution(distribution: Mapping[str, float], n_shots: Optional[in
         parts.append(
             "以上比例来自 %d 次重复测量。量子测量每次只给一个答案，"
             "只有重复很多次才能看出这个分布。" % n_shots
+        )
+
+    return " ".join(parts)
+
+
+def explain_hardware_noise(
+    observed: Mapping[str, float], ideal: Mapping[str, float]
+) -> str:
+    """对着理想分布解释真机结果为什么"脏"。
+
+    专项奖标准要求用户"理解其科学原理"，而真机第一次跑出来最扎眼的现象就是
+    不该出现的结果出现了。这里不回避、也不粉饰，直接把噪声当成一堂课来讲。
+
+    **必须传入理想分布，不能从观测数据里猜。** 早先的实现按"概率达到最高峰一半以上"
+    认定主峰，在真机上被实测打穿：同一个贝尔态电路，一次跑出 45%/44%（判对），
+    下一次跑出 59%/29%（29% 差一点没够到一半线，于是把 11 误判成噪声，
+    还反过来宣称"40% 落在 00 之外"）。真机批次间波动就是这么大，
+    调阈值只是把失败推到下一次。理想分布由 refsim 精确算出，对比才是确定的。
+    """
+    if not observed:
+        return "没有得到任何结果。"
+
+    total = sum(observed.values()) or 1.0
+    normalized = {key: value / total for key, value in observed.items()}
+    support = set(ideal)
+    leakage = sum(value for key, value in normalized.items() if key not in support)
+
+    parts: List[str] = [
+        "这次用的是真实的量子计算机，不是模拟器，所以结果会比模拟器脏一些"
+        "——这不是出错，是真实物理。"
+    ]
+
+    if leakage > 0.01:
+        parts.append(
+            "有 %.1f%% 的测量落在了 %s 之外。在无噪声模拟器上，这些位置的概率严格是 0。"
+            % (leakage * 100, "、".join(sorted(support)))
+        )
+    else:
+        parts.append(
+            "该出现的结果之外几乎没有杂散测量，只有 %.1f%%——对真机来说相当干净。"
+            % (leakage * 100)
+        )
+
+    # 除了"冒出不该有的结果"，噪声还会让本该等高的峰变得一高一低。
+    # 这一项常被忽略，但真机上往往比漏出更明显，不提就等于漏掉了一半现象。
+    if len(support) >= 2:
+        inside = {key: normalized.get(key, 0.0) for key in support}
+        expected_each = sum(ideal.values()) / len(ideal) if ideal else 0.0
+        spread = max(inside.values()) - min(inside.values())
+        if spread > 0.08 and abs(max(ideal.values()) - min(ideal.values())) < 0.02:
+            high = max(inside, key=lambda key: inside[key])
+            low = min(inside, key=lambda key: inside[key])
+            parts.append(
+                "而且本该各占 %.0f%% 的 %s 和 %s 变成了 %.1f%% 和 %.1f%%——"
+                "真机不只会冒出不该有的结果，还会让该等高的两边一高一低。"
+                % (expected_each * 100, high, low, inside[high] * 100, inside[low] * 100)
+            )
+
+    if leakage > 0.01 or len(support) >= 2:
+        parts.append(
+            "这些偏差来自三件事：量子比特会随时间「忘记」自己的状态（这叫退相干）、"
+            "每个量子门的操作都有微小偏差、读取结果本身也会出错。"
+            "比特越多、电路越长，误差累积得越厉害。"
+        )
+        parts.append(
+            "这正是「量子纠错」成为整个领域核心难题的原因——你刚刚亲手测到了它。"
         )
 
     return " ".join(parts)

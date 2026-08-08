@@ -8,7 +8,7 @@
 
 把要申报项目的方框改成 `[x]`，并填写对应内容：
 
-- [ ] L1 真机 —— **待完成**：本地模拟器已全部打通，还需注册量旋云跑一次真机
+- [x] L1 真机 —— 量旋云 gemini_vp 与 triangulum_vp 两个平台均已实跑
 - [x] L2 交互体验
 - [x] 工程与产品化
 - [ ] 自定义量子 RISC-V Bonus —— 本次不参加 L3，不申报
@@ -16,22 +16,66 @@
 
 ## L1 真机
 
-每个有效真机平台计 5 分，最多两个平台。模拟器不计真机分。每个平台复制并填写一次下面的信息：
+每个有效真机平台计 5 分，最多两个平台。模拟器不计真机分。两个平台都是真机（NMR），
+不是云模拟器——账号可见的 `simulator` 平台我们刻意没用。
 
 ```text
-平台名称：量旋云 SpinQ Cloud（待打通）
-平台 job ID：[待填写]
-运行时间：[待填写，带时区]
-shots：[待填写]
-实际执行的 QASM：[待填写仓库内路径]
-平台返回的原始结果：[待填写仓库内路径]
-任务页截图：[待填写仓库内路径]
+平台名称：量旋云 SpinQ Cloud —— Gemini（gemini_vp，2 比特 NMR 真机）
+平台 job ID：G-260808-0002
+运行时间：2026-08-08 11:15:00 (UTC+8)
+shots：1024
+实际执行的 QASM：starter_kit/evidence/files/spinq-cloud-gemini-bell-circuit.qasm
+平台返回的原始结果：starter_kit/evidence/files/spinq-cloud-gemini-bell-result.json
+任务页截图：[待补充，控制台任务页]
 ```
 
-> 打通真机后，把 QASM 与原始结果保存为
-> `evidence/files/spinq-circuit.qasm` 与 `evidence/files/spinq-result.json`，
-> 并把上面的方框改成 `[x]`。真机是加分项而非资格线，但**专项奖标准里写了"在真实量子机上"**，
-> 所以这一项对我们不是可选的。
+```text
+平台名称：量旋云 SpinQ Cloud —— Triangulum（triangulum_vp，3 比特 NMR 真机）
+平台 job ID：S-260808-0002
+运行时间：2026-08-08 11:17:48 (UTC+8)
+shots：1024
+实际执行的 QASM：starter_kit/evidence/files/spinq-cloud-triangulum-ghz3-circuit.qasm
+平台返回的原始结果：starter_kit/evidence/files/spinq-cloud-triangulum-ghz3-result.json
+任务页截图：[待补充，控制台任务页]
+```
+
+复现命令（需 `LOOMQ_SPINQ_USERNAME` 与 `LOOMQ_SPINQ_KEYFILE` 两个环境变量，凭据不入库）：
+
+```text
+python tools/run_spinq_cloud.py platforms    # 看哪些真机在线，不提交任务
+python tools/run_spinq_cloud.py calibrate --qubits 2
+python tools/run_spinq_cloud.py run --qasm starter_kit/circuits/bell.qasm --platform gemini_vp
+```
+
+**真机与模拟器的差距是真实的，我们照实报。** 按官方 `evaluator.py` 的口径
+（`1 − Hellinger 距离`，注意它比 Qiskit 的 `hellinger_fidelity` 更严）：
+
+| 平台 | 电路 | 保真度 | 理想态占比 |
+| --- | --- | --- | --- |
+| gemini_vp | Bell | 0.7743 | 90.14% |
+| triangulum_vp | GHZ-3 | 0.6233 | 73.63% |
+
+同样两个电路在本地模拟器上是 1.0000 与 0.9895。这个落差不是 bug，是 NMR 真机的退相干与
+读出误差——恰恰是"第一次在真实量子机上做实验"该看到的东西，CLI 里也会如实解释而不是粉饰。
+
+**接真机需要改中间层的三处，都是从 spinqit 0.2.4 源码确认的，不是试出来的：**
+
+1. **云端拒绝显式 measure。** `SpinQCloudBackend.assemble` 见到 MEASURE 节点直接抛
+   `CircuitOperationValidationError`，测量由平台在电路末尾自动完成。所以提交前要在 IR 层
+   摘掉全部 Measure（`backends._measure_free_qasm`），但保留 creg 声明——编译器要靠它
+   确定 `ir.dag['cnum']`。
+2. **结果位宽按 n_qubits 而非 n_clbits。** 部分测量只在 `sqc_25_vp` 与 `simulator` 上支持，
+   其余平台一律返回全部比特。
+3. **官方 `execute()` 会无限期阻塞**（内部 `hanging=True, timeout=None`，每 5 秒轮询）。
+   我们改为自己 `submit_task` + `get_task_result`，好处是能设超时，且**超时也保留 task_code**
+   ——真机证据要的就是这个可溯源编号，任务还在排队时不该把它丢掉。
+
+**位序是独立标定的，没有沿用模拟器结论。** 见
+`evidence/files/spinq-cloud-bitorder-calibration.json`：真机的自动测量是另一条代码路径，
+映射由平台决定而非我们的 measure 语句，所以必须重新标。用非对称探针（只对 q[0] 施加 x）
+在 2 比特与 3 比特各标一次，主峰分别落在 `10` 与 `100`，即原生位串以 q[0] 为最左字符，
+与大赛约定相反。两个位宽结论一致，排除了"自动测量整体错位"这个竞争解释。
+公开的 bell/ghz3 在这里没有鉴别力——它们回文对称，整串反转后分布不变。
 
 ## L2 交互体验
 
@@ -45,6 +89,8 @@ shots：[待填写]
 适合现场体验的 3 个用户任务：
 1. 启动后直接输入 1 —— 做出两比特贝尔态。观察结果只有 00 和 11 各一半，
    中间的 01、10 一次都不出现；界面会解释这就是「纠缠」。
+   加 --backend spinq_cloud 则这一步直接跑在**真实量子计算机**上（约两分钟），
+   界面会并列给出真机实测与理想分布，并解释两者的差距从何而来。
 2. 输入 3 —— 用 Grover 搜索在八个抽屉里找出 111。观察正确答案的概率
    从 12.5% 被放大到约 78%，界面会说明这是干涉在起作用。
 3. 用自然语言输入「让四个比特全都纠缠起来」—— 智能体生成电路、
@@ -70,13 +116,26 @@ python tools/selftest_l2_live.py --stretch  # 另加 12 个刻意超纲的进阶
 之所以要自建这套压测，是因为公开的 `evaluator.py --level l2` 只有 1 个用例，
 且只校验"回复里能抽出可解析的 QASM"，不校验电路对不对——它全绿并不能说明任何问题。
 
-交互设计上有三点是刻意为之，便于现场核验：
+交互设计上有四点是刻意为之，便于现场核验：
 
 1. **永远能跑起来。** 未安装量子 SDK 时自动回落到内置参考模拟器（纯标准库精确模拟），
    未配置模型服务时回落到内置示例库，流程完整不中断。
 2. **先看懂再动手。** 首屏用三句话讲清量子比特、测量与分布，不堆术语。
 3. **错误可恢复。** 所有失败路径都给出下一步动作，不打印堆栈；
    `--backend refsim` 是任何环境下都成立的兜底方案。
+4. **真机就在同一个入口里。** `--backend spinq_cloud` 让零基础用户输入一个数字
+   就能把电路送上真实量子计算机——专项奖标准写的是"在真实量子机上完成第一个实验"，
+   所以真机必须是产品功能，而不只是我们内部的验证脚本。
+
+**真机路径的交互有三处是被实测逼出来的，不是设想的：**
+
+- **不能默默卡住。** 真机排队加执行约两分钟。`backends.run_spinq_cloud` 接受一个
+  `progress` 回调，CLI 用它在等待期间逐条报出"已连上哪个平台、任务编号是多少、
+  大概要等多久"。对零基础用户，两分钟无输出的黑屏就等于程序死了。
+- **真机装不下就说清为什么。** 在线真机只有 2 与 3 比特两台，4 比特以上的请求必然失败。
+  这时不报错退出，而是说明"真机现在还很小，这不是你的电路有问题"，再回落到模拟器——
+  顺便把"模拟器为什么仍然重要"这件事讲明白了。
+- **结构性解释必须来自理想分布，不能从真机数据里猜。** 见下节。
 
 ## 工程与产品化
 
@@ -92,8 +151,10 @@ python tools/selftest_l2_live.py --stretch  # 另加 12 个刻意超纲的进阶
     python tools/selftest_transpile.py     # 转译层，37 项断言
     python tools/selftest_decompose.py     # 门分解数值验证，22 项断言
     python tools/selftest_agent.py         # L2 Agent，42 项断言，用本地假端点
+    python tools/selftest_explain.py       # 结果解释文案，35 项断言
     python tools/gen_circuits.py           # 生成隐藏电路回归集 + 灵敏度检验
     python tools/run_regression.py         # 回归集比对理想分布
+    python tools/check_hardware_evidence.py  # 按官方三条标准核验真机证据
     cd starter_kit && python -m loomq.cli --demo
 
 架构说明：见 PLAN.md 第三节。分层为
@@ -131,6 +192,23 @@ L2 自验闭环的一处非平凡设计（可现场问询）：
   ——问"这个分布是否满足用户要求"，而不是"你的标签对不对"。
   见 loomq/agent.py 的 classify_verification / adjudicate_label_conflict，
   以及 tools/selftest_agent.py 里"标签冲突·救回 / 标签冲突·否决"两组用例。
+
+真机解释逻辑的一处非平凡设计（可现场问询）：
+  真机第一次跑出来最扎眼的现象是"不该出现的结果出现了"，讲不清这一点，
+  用户会以为自己做错了——而专项奖标准要求的正是"理解其科学原理"。
+  最初的实现完全数据驱动：把"概率达到最高峰一半以上"的结果认定为主峰，
+  其余算噪声。它在第一次真机运行（任务 G-260808-0003，45%/44%）上表现正常。
+  第二次运行（任务 G-260808-0004）打穿了它：同一个贝尔态电路跑出 59%/29%，
+  29% 差一点没够到一半线，于是 11 被误判成噪声，界面既丢掉了"这就是纠缠"这句话，
+  又反过来宣称"40% 落在 00 之外"。真机批次间波动就是这么大。
+  根因不是阈值没调好，而是**光看一个带噪声的分布，原理上就推不出哪些结果是信号**，
+  调阈值只是把失败推到下一次。所以改为不猜：用 refsim 精确算出该电路的理想分布，
+  结构性解释讲理想的（电路本该做什么），偏差解释讲实测的（真机差在哪、差多少）。
+  界面把两份分布并列显示，反而成了最好的教具。
+  `explain_distribution` 里保留的主峰识别也同步改成"清晰可分才下结论"
+  （切点处前一名须达后一名 3 倍），证据不足时宁可少说一句。
+  见 loomq/visualize.py 的 explain_hardware_noise，以及
+  tools/selftest_explain.py 里用那组真实坏批次数据钉住的回归用例。
 
 目标用户和使用场景：
   有明确问题意识、具备基本计算机使用能力，但没有量子物理背景的人——

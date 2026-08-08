@@ -178,18 +178,19 @@ cd ..
 
 ## 步骤 4 · 离线自测（不需要 SDK，不需要 API key，纯标准库）
 
-五条命令，加起来约 10 秒：
+六条命令，加起来约 10 秒：
 
 ```bash
 python tools/selftest_transpile.py     # 转译层，37 项
 python tools/selftest_decompose.py     # 门分解数值验证，22 项
 python tools/selftest_agent.py         # L2 Agent，42 项，用本地假端点
+python tools/selftest_explain.py       # 结果解释文案，35 项
 python tools/gen_circuits.py           # 重新生成隐藏电路回归集 + 灵敏度检验
 python tools/run_regression.py         # 回归集跑一遍参考模拟器
 ```
 
-**通过判据**：第 1、2、3、5 条最后一行都输出 `全部通过`，无任何 `[FAIL]`；
-第 4 条把 6 个电路与理想分布写进 `regression/`，且末尾报告
+**通过判据**：第 1、2、3、4、6 条最后一行都输出 `全部通过`，无任何 `[FAIL]`；
+第 5 条把 6 个电路与理想分布写进 `regression/`，且末尾报告
 「相位错误探测器 4 个，位序错误探测器 4 个」——两个数都不能是 0。
 
 这五条在本机（Windows、无 SDK、无 key）已全部通过。在目标机器上重跑是为了确认
@@ -323,6 +324,66 @@ OpenQASM 3 的 `cp` 都对；OriginIR 契约里写的 `CR` **是否为 cu1 语�
 
 ---
 
+## 步骤 7.5 · 量旋云真机（+10 分，本机已做完）
+
+**这一步本机已经全部完成，两个平台的证据都已入库。** 换机后除非要重跑，
+否则只需确认 `starter_kit/evidence/files/` 里的四个文件在，以及
+`python tools/check_hardware_evidence.py` 输出三条标准全达标。
+
+要在新机器上重跑的话：
+
+```bash
+python tools/make_spinq_key.py            # 生成 PEM 私钥，打印公钥
+# 把打印出的 ssh-rsa 那一整行贴到 cloud.spinq.cn 账号设置的 SSH 公钥处
+setx LOOMQ_SPINQ_USERNAME 20260808
+setx LOOMQ_SPINQ_KEYFILE  %USERPROFILE%\.spinq\spinq_cloud_rsa
+python tools/run_spinq_cloud.py platforms   # 看哪些真机在线，不提交任务
+python tools/run_spinq_cloud.py calibrate --qubits 2   # 标定位序，必做
+python tools/run_spinq_cloud.py run --qasm starter_kit/circuits/bell.qasm --platform gemini_vp
+```
+
+**密钥格式是唯一的硬坑。** 量旋 SDK 用 `RSA.importKey` 读私钥，只认 PEM
+（`-----BEGIN RSA PRIVATE KEY-----`）。而 OpenSSH 7.8 之后 `ssh-keygen` 默认输出
+自有格式（`-----BEGIN OPENSSH PRIVATE KEY-----`），`importKey` 会直接抛异常。
+`make_spinq_key.py` 用 PyCryptodome 直接生成以绕开这件事，并会跑一遍签名自检；
+真要用 `ssh-keygen` 必须显式加 `-m PEM`。私钥写在 `~/.spinq/`，**刻意放在仓库外**。
+
+**判定标准与直觉相反，别用错。** 真机这 10 分**只查主峰命中，不查保真度**，
+题面原话是「真机允许噪声，只查主峰命中」。0.97 那个阈值属于 L1 语义等价的 35 分，
+跑在无噪声模拟器上。我们真机实测保真度只有 0.7743（Bell）与 0.6233（GHZ-3），
+但 Top-2 主导态完全正确、分离度 5.3 / 5.7 倍，三条标准全过。
+**把真机保真度往上优化一分不得**，别在这上面花时间。
+
+真正的风险是第 3 条：评委会抽样登录控制台复核 `job_id`，
+所以**任务页截图必须补进 `evidence/files/`**，这一步只能人工做。
+
+接真机需要改中间层的三处（都从 spinqit 0.2.4 源码确认，已实现在 `backends.py`）：
+
+1. **云端拒绝显式 measure。** `assemble` 见到 MEASURE 节点直接抛
+   `CircuitOperationValidationError`，测量由平台在末尾自动完成。
+   `_measure_free_qasm` 在 IR 层摘掉全部 Measure，但**保留 creg 声明**——
+   编译器要靠它确定 `ir.dag['cnum']`。
+2. **结果位宽按 `n_qubits` 而非 `n_clbits`。** 部分测量只在 `sqc_25_vp` 与
+   `simulator` 上支持，其余平台一律返回全部比特。
+3. **官方 `execute()` 会无限期阻塞**（内部 `hanging=True, timeout=None`，每 5 秒轮询）。
+   改为自己 `submit_task` + `get_task_result`，能设超时，且**超时也保留 task_code**
+   ——真机证据要的就是这个可溯源编号，任务还在排队时不该丢掉它。
+
+位序**必须为真机独立标定，不能沿用模拟器结论**：云端自动测量是另一条代码路径。
+2026-08-08 实测（`gemini_vp` 任务 `G-260808-0001`、`triangulum_vp` 任务 `S-260808-0001`）：
+非对称探针 `x q[0]` 在 2 比特主峰落 `10`、3 比特主峰落 `100`，即原生位串以 `q[0]` 为
+最左字符，与大赛约定相反，`NATIVE_MATCHES_CONTEST["spinq_cloud"] = False`。
+两个位宽结论一致，排除了「自动测量整体错位」这个竞争解释。
+
+零基础用户也能用真机，这是专项奖标准的硬要求（「在真实量子机上完成人生第一个实验」）：
+
+```bash
+cd starter_kit && python -m loomq.cli          # 配好凭据后开场会提示可用真机
+# 交互中输入 real 切到真机，输入 1 跑贝尔态，再输入 sim 切回模拟器对照
+```
+
+---
+
 ## 步骤 8 · L2（30 分，专项奖主战场）
 
 **已接真实模型跑通**（`deepseek-v4-flash`，对标组 24/24）。`submission.yaml` 里的
@@ -431,10 +492,11 @@ python starter_kit/prepare_submission.py --team-id <TEAM_ID>
 | `loomq/ir.py` `qasm2_parser.py` `emitters.py` | 已验证，`selftest_transpile.py` 37 项 |
 | `loomq/refsim.py` | 已验证，理想分布对上官方公开值 |
 | `loomq/decompose.py` | 已验证，`selftest_decompose.py` 22 项（含 crz 陷阱的数值反例） |
-| `loomq/visualize.py` `loomq/cli.py` | 已验证，`--demo` 端到端跑通，字符集自动降级 |
+| `loomq/visualize.py` `loomq/cli.py` | 已验证，`--demo` 端到端跑通，字符集自动降级；`selftest_explain.py` 35 项 |
 | `loomq/agent.py` | **已接真实模型实测**，`selftest_agent.py` 42 项 + `selftest_l2_live.py` 对标组 24/24 |
-| `loomq/counts.py` | **已实测标定**：spinq/braket 原生位序都与约定相反，均需反转 |
+| `loomq/counts.py` | **已实测标定**：spinq/braket/真机原生位序都与约定相反，均需反转 |
 | `loomq/backends.py` braket / spinq | **已实测**，三处 `[待实测]` 全部关闭 |
+| `loomq/backends.py` spinq_cloud（真机） | **已实测**，两个平台各跑通，CLI `--backend spinq_cloud` 端到端验证 |
 | `loomq/backends.py` originq | 已写，pyqpanda 未装，仍未验证，优先级低 |
 | `regression/` 回归集 | **已实测**，6 电路 × 2 后端保真度 ≥0.989 全 PASS |
 | `adapter.py` transpile / run | 已接通，L1 公开自测四个 case 全 PASS |
@@ -447,7 +509,11 @@ python starter_kit/prepare_submission.py --team-id <TEAM_ID>
 
 **L2 客观分已实测达标**：对标组 24/24，折算 ≈ 20/20，远超"交互体验分计入"所需的 12 分线。
 
-剩下的：量旋云真机、找真人试 CLI、录演示视频。
+**真机 10 分已拿满**：`gemini_vp` 与 `triangulum_vp` 两个平台，
+`check_hardware_evidence.py` 按官方三条标准核验全达标。
+
+剩下的：控制台任务页截图（只能人工，护住已得的 10 分）、找真人试 CLI、
+录演示视频、pyqpanda（L1 进阶，12 → 35 的唯一途径，也是剩余最大的分数杠杆）。
 
 ## 附二：命令速查
 
@@ -464,8 +530,10 @@ $env:PYTHONIOENCODING = "utf-8"   # 否则中文输出在重定向时会乱码
 python tools/selftest_transpile.py                  # 转译层 37 项
 python tools/selftest_decompose.py                  # 门分解 22 项
 python tools/selftest_agent.py                      # L2 Agent 42 项
+python tools/selftest_explain.py                    # 结果解释文案 35 项
 python tools/gen_circuits.py                        # 重新生成回归集 + 灵敏度检验
 python tools/run_regression.py                      # 回归集（参考模拟器）
+python tools/check_hardware_evidence.py             # 真机证据按官方三条标准核验
 cd starter_kit && python -m loomq.cli --demo         # 零基础入口演示
 ```
 
@@ -476,6 +544,16 @@ python tools/probe_bitorder.py                             # 位序标定
 python tools/run_regression.py --target spinq,braket       # 回归集（真实后端）
 cd starter_kit && python evaluator.py --level l1 --target spinq,braket
 cd starter_kit && python -m loomq.cli --backend braket --demo
+```
+
+还需要 `LOOMQ_SPINQ_USERNAME` / `LOOMQ_SPINQ_KEYFILE`（真机，每次约两分钟）：
+
+```bash
+python tools/make_spinq_key.py                             # 生成密钥并打印公钥
+python tools/run_spinq_cloud.py platforms                  # 查在线真机，不提交任务
+python tools/run_spinq_cloud.py calibrate --qubits 2       # 位序标定，必做
+python tools/run_spinq_cloud.py run --qasm starter_kit/circuits/bell.qasm --platform gemini_vp
+cd starter_kit && python -m loomq.cli --backend spinq_cloud
 ```
 
 还需要 `LOOMQ_LLM_*` 环境变量：
