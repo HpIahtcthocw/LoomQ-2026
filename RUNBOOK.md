@@ -178,7 +178,7 @@ cd ..
 
 ## 步骤 4 · 离线自测（不需要 SDK，不需要 API key，纯标准库）
 
-八条命令，加起来约 20 秒：
+九条命令，加起来约 25 秒：
 
 ```bash
 python tools/selftest_transpile.py     # 转译层，37 项
@@ -187,6 +187,7 @@ python tools/selftest_agent.py         # L2 Agent，42 项，用本地假端点
 python tools/selftest_explain.py       # 结果解释文案，35 项
 python tools/selftest_hybrid.py        # L3 混合编译，随机程序穷举注入差分
 python tools/selftest_quantum_ext.py   # 量子 RISC-V 扩展，七组端到端测试
+python tools/selftest_web.py           # 网页入口，62 项，起真服务发真请求
 python tools/gen_circuits.py           # 重新生成隐藏电路回归集 + 灵敏度检验
 python tools/run_regression.py         # 回归集跑一遍参考模拟器
 ```
@@ -195,7 +196,7 @@ python tools/run_regression.py         # 回归集跑一遍参考模拟器
 `gen_circuits.py` 把 6 个电路与理想分布写进 `regression/`，且末尾报告
 「相位错误探测器 4 个，位序错误探测器 4 个」——两个数都不能是 0。
 
-这八条在本机（Windows、无 SDK、无 key）已全部通过。在目标机器上重跑是为了确认
+这九条在本机（Windows、无 SDK、无 key）已全部通过。在目标机器上重跑是为了确认
 代码搬运完整、没有文件缺失、没有换行符或编码损坏。
 
 `selftest_hybrid.py` 想加压时可以调参数，默认 300 组够快，实测跑到 800 组也全过：
@@ -204,15 +205,33 @@ python tools/run_regression.py         # 回归集跑一遍参考模拟器
 python tools/selftest_hybrid.py --programs 800 --seed 7
 ```
 
-顺手确认零基础入口也是好的：
+顺手确认两个零基础入口都是好的。先看终端版：
 
 ```bash
 cd starter_kit && python -m loomq.cli --demo && cd ..
 ```
 
 **通过判据**：依次打印三个任务（贝尔态 / GHZ-3 / Grover-3）的电路图、分布与解释，
-退出码 0。Grover 的 `111` 应占约 78%。若终端出现乱码，说明字符集降级没生效，
-把终端编码设为 UTF-8（Windows：`chcp 65001`）后重试。
+退出码 0。Grover 的 `111` 应占约 78%。中文不应乱码——`cli.main()` 开头会把
+标准输出改成 UTF-8 并在 Windows 上切到代码页 65001，不需要你先手敲 `chcp`。
+
+再看网页版，这是给零基础用户的主入口：
+
+```bash
+# Windows          双击 start.ps1，或在 PowerShell 里：
+.\start.ps1
+# macOS / Linux
+./start.sh
+```
+
+**通过判据**：浏览器自动打开 `http://127.0.0.1:8899/`，看到「五分钟，跑出你的
+第一个量子实验」开场页；点「读完了，开始计时」再点第一张卡片，两秒内出现
+SVG 电路图、结果分布条和一段中文解释。
+
+什么都没配也能跑到这一步——内置参考模拟器不需要任何依赖和网络。
+`.env` 里配了 `LOOMQ_LLM_*` 才能用「现在换你说」，配了 `LOOMQ_SPINQ_*`
+才能用「送到真机上跑」。把 `env.example.txt` 复制成 `.env` 填值即可，
+`.env` 在 `.gitignore` 里，不会被提交。
 
 ---
 
@@ -593,6 +612,7 @@ python starter_kit/prepare_submission.py --team-id <TEAM_ID>
 | `loomq/refsim.py` | 已验证，理想分布对上官方公开值 |
 | `loomq/decompose.py` | 已验证，`selftest_decompose.py` 22 项（含 crz 陷阱的数值反例） |
 | `loomq/visualize.py` `loomq/cli.py` | 已验证，`--demo` 端到端跑通，字符集自动降级；`selftest_explain.py` 35 项 |
+| `loomq/web.py` + `loomq/webui/`（网页入口） | **已实测**，`selftest_web.py` 62 项；真机路径端到端跑通（任务 G-260810-0003） |
 | `loomq/agent.py` | **已接真实模型实测**，`selftest_agent.py` 42 项 + `selftest_l2_live.py` 对标组 24/24 |
 | `loomq/counts.py` | **已实测标定**：spinq/braket/真机需反转，**originq 与约定一致** |
 | `loomq/backends.py` braket / spinq | **已实测**，三处 `[待实测]` 全部关闭 |
@@ -619,8 +639,16 @@ python starter_kit/prepare_submission.py --team-id <TEAM_ID>
 它全绿之后才发现题面自己给的示例编译不过（示例带 `//` 注释）。
 判信心要看 `selftest_hybrid.py`：那才是复刻官方判定方式的差分测试。
 
-剩下的：找真人试 CLI、录演示视频。真机溯源已用 `fetch_spinq_raw.py` 按编号复核，
-不再依赖控制台截图（那个列表查不到 SDK 提交的任务）。
+**网页入口已完成**：`start.ps1` / `start.sh` 一键起服务并打开浏览器，
+零依赖零配置也能完整跑通。开场引导 → 三个示例 → 中文自由提问 → 真机对照 →
+三道原理验收 → 完成凭证，是对着专项奖那句判据逐项搭的。
+只用标准库 `http.server`，没有给 requirements.txt 增加任何一行。
+八张截图在 `starter_kit/evidence/files/webui/`。
+
+剩下的只有一件：**找真人做五分钟实测**，记录模板已经写好在
+`starter_kit/evidence/five-minute-test.md`，照着填即可。录演示视频可选。
+真机溯源已用 `fetch_spinq_raw.py` 按编号复核，不再依赖控制台截图
+（那个列表查不到 SDK 提交的任务）。
 
 ## 附二：命令速查
 
@@ -640,11 +668,20 @@ python tools/selftest_agent.py                      # L2 Agent 42 项
 python tools/selftest_explain.py                    # 结果解释文案 35 项
 python tools/selftest_hybrid.py                     # L3 混合编译差分（--programs 加压）
 python tools/selftest_quantum_ext.py                # 量子 RISC-V 扩展七组测试
+python tools/selftest_web.py                        # 网页入口 62 项（起真服务发真请求）
 python tools/riscv_quantum_emulator.py              # Bonus 最小演示：Bell 态驱动经典分支
 python tools/gen_circuits.py                        # 重新生成回归集 + 灵敏度检验
 python tools/run_regression.py                      # 回归集（参考模拟器）
 python tools/check_hardware_evidence.py             # 真机证据按官方三条标准核验
-cd starter_kit && python -m loomq.cli --demo         # 零基础入口演示
+cd starter_kit && python -m loomq.cli --demo         # 零基础入口演示（终端版）
+.\start.ps1            # 零基础入口（网页版），macOS/Linux 用 ./start.sh
+```
+
+网页入口的回归截图（需先起服务）：
+
+```powershell
+.\tools\shoot_webui.ps1                    # 七张：开场/选例/结果/提问/验收/凭证/手机
+.\tools\shoot_webui.ps1 -Job <任务编号>     # 多截一张真机对照，编号来自跑过的真机任务
 ```
 
 必须在 `.venv`（3.10 + SDK）里跑：

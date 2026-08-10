@@ -158,6 +158,26 @@ DEMO_TASKS = [
 ]
 
 
+def _ensure_utf8_output() -> None:
+    """Windows 控制台默认按 GBK 输出，开场引导会整屏变成乱码。
+
+    评委和零基础用户多半在 Windows 上直接双击 PowerShell 就跑，不能指望对方
+    先自己敲一句 chcp 65001——那正是这个项目想消掉的门槛。
+    """
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        except Exception:
+            pass
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def _print(text: str = "") -> None:
     """输出时对不支持的字符做降级，避免在任何终端里出现乱码。"""
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
@@ -485,6 +505,7 @@ def demo(target: str, shots: int) -> int:
 
 
 def main(argv: Optional[list] = None) -> int:
+    _ensure_utf8_output()
     parser = argparse.ArgumentParser(
         description="LoomQ 交互入口：不懂量子也能跑量子程序",
         formatter_class=argparse.RawDescriptionHelpFormatter,
