@@ -215,12 +215,32 @@ async function run(payload, titleHint) {
   }
   if (started.error) return fail(started.error);
 
+  // 真机排队要一两分钟，这期间后端一句进度也不会再吐。没有任何动静的
+  // 一百秒足以让人认为页面死了然后关掉——被试就是这么丢掉真机那一步的。
+  // 秒表本身不提供信息，但它证明这个页面还活着。
+  const t0 = Date.now();
+  const waitBox = $('running-wait');
+  waitBox.hidden = body.backend !== 'spinq_cloud';
+  const tick = setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    waitBox.textContent = `已等待 ${s} 秒　排队通常一到两分钟，页面会一直等，不用关`;
+  }, 1000);
+
+  try {
+    return await pollUntilDone(started.job);
+  } finally {
+    clearInterval(tick);
+    waitBox.hidden = true;
+  }
+}
+
+async function pollUntilDone(jobId) {
   let seen = 0;
   for (;;) {
     await wait(700);
     let job;
     try {
-      job = await api.job(started.job);
+      job = await api.job(jobId);
     } catch {
       return fail('取不到运行状态，本地服务可能已经停了。');
     }
@@ -295,35 +315,63 @@ function show(r) {
   paintRail();
 }
 
-/* 每次跑完都要有明确的下一步，否则用户就停在这里了 */
+/* 每次跑完都要有明确的下一步，否则用户就停在这里了。
+ *
+ * 这里曾经是一条死板的直线：必须先「自己说一个」，真机按钮才肯出现。
+ * 结果被试跑完示例想去真机，界面根本不给入口——他只能自己翻右下角那个
+ * 折叠着的「运行环境」去换后端。实测反馈就是一句「真机的跑不了」。
+ * 判据里「在真实量子机上完成」是硬指标，通往它的路不能藏在二级菜单里。
+ */
 function paintNext() {
   const hwReady = state.backends.some((b) => b.id === 'spinq_cloud' && b.ready);
   const btn = $('btn-next');
+  const alt = $('btn-alt');
+  alt.hidden = true;
+
+  const toHardware = () => {
+    $('sel-backend').value = 'spinq_cloud';
+    updateDockNote();
+    // 重放上一次的 payload，而不是拿标题回头再问一遍模型——
+    // 真机对照要成立，两边必须是同一个电路。
+    run(state.lastPayload || { example: '1' }, '正在送往真实的量子计算机');
+  };
+  const toAsk = () => go('ask');
+  const toQuiz = () => { buildQuiz(); go('quiz'); };
+
+  const setAlt = (label, fn) => {
+    alt.hidden = false;
+    alt.textContent = label;
+    alt.onclick = fn;
+  };
+
+  if (hwReady && !state.ranHardware) {
+    $('next-title').textContent = state.ran === 1
+      ? '你已经跑完了人生第一个量子实验'
+      : '到这里为止，跑的都是模拟器';
+    $('next-note').textContent =
+      `用时 ${elapsedText()}。刚才那是模拟器算出来的理想结果。` +
+      '把同一个电路送到深圳那台真的量子计算机上，看看真实世界里它长什么样——要排队约两分钟。';
+    btn.textContent = '送到真机上跑';
+    btn.onclick = toHardware;
+    setAlt(state.askedOwn ? '去验收' : '先自己说一个', state.askedOwn ? toQuiz : toAsk);
+    return;
+  }
 
   if (!state.askedOwn) {
-    $('next-title').textContent = '你已经跑完了人生第一个量子实验';
+    $('next-title').textContent = state.ranHardware
+      ? '真机你也跑过了'
+      : '你已经跑完了人生第一个量子实验';
     $('next-note').textContent = `用时 ${elapsedText()}。接下来试试不用现成的例子，用你自己的话说一个。`;
     btn.textContent = '换我自己说一个';
-    btn.onclick = () => go('ask');
+    btn.onclick = toAsk;
+    setAlt('直接去验收', toQuiz);
     return;
   }
-  if (hwReady && !state.ranHardware) {
-    $('next-title').textContent = '到这里为止，跑的都是模拟器';
-    $('next-note').textContent = '把同一个电路送到深圳那台真的量子计算机上，看看结果差在哪。要排队约两分钟。';
-    btn.textContent = '送到真机上跑';
-    btn.onclick = () => {
-      $('sel-backend').value = 'spinq_cloud';
-      updateDockNote();
-      // 重放上一次的 payload，而不是拿标题回头再问一遍模型——
-      // 真机对照要成立，两边必须是同一个电路。
-      run(state.lastPayload || { example: '1' }, '正在送往真实的量子计算机');
-    };
-    return;
-  }
+
   $('next-title').textContent = '最后一步';
   $('next-note').textContent = '三个问题，检验一下刚才发生的事你是不是真的看懂了。';
   btn.textContent = '去验收';
-  btn.onclick = () => { buildQuiz(); go('quiz'); };
+  btn.onclick = toQuiz;
 }
 
 /* ── 电路图 ─────────────────────────────────────────── */

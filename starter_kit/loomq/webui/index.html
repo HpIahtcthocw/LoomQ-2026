@@ -72,6 +72,19 @@
         <button class="btn btn--primary btn--lg" id="btn-start">读完了，开始计时</button>
         <span class="intro__hint" id="intro-hint">计时只是为了验证「五分钟够不够」，随时可以停</span>
       </div>
+
+      <details class="aside">
+        <summary>顺便一提，LoomQ 是什么</summary>
+        <p>
+          全世界的量子计算机分属好几家，每家说自己的语言——为量旋那台机器写的程序，
+          换到本源或者亚马逊的机器上要整个重写。LoomQ 是夹在中间的那层翻译：
+          一份代码进去，自动翻成三家各自的方言，结果按同一种格式回来。
+        </p>
+        <p>
+          再往上加一层：你用中文说一句话，它变成电路、跑起来，再用人话告诉你结果什么意思。
+          这个页面就是那层东西的入口。跑完最后一步，我会再跟你说一遍你到底做了什么。
+        </p>
+      </details>
     </div>
   </section>
 
@@ -90,6 +103,7 @@
     <div class="running" id="running">
       <div class="running__spin" aria-hidden="true"></div>
       <b id="running-title">正在运行</b>
+      <div class="running__wait" id="running-wait" hidden></div>
       <ul class="running__log" id="running-log"></ul>
     </div>
 
@@ -130,7 +144,10 @@
           <b id="next-title">下一步</b>
           <span id="next-note"></span>
         </div>
-        <button class="btn btn--primary" id="btn-next"></button>
+        <div class="nextbar__act">
+          <button class="btn" id="btn-alt" hidden></button>
+          <button class="btn btn--primary" id="btn-next"></button>
+        </div>
       </div>
     </div>
   </section>
@@ -159,6 +176,31 @@
     <div id="quiz"></div>
     <div class="quizfoot" id="quiz-foot" hidden>
       <p class="prose" id="quiz-verdict"></p>
+
+      <section class="coda">
+        <h3 class="coda__title">所以你刚才做的是什么</h3>
+        <p class="prose">
+          你没写一行代码。你说了一句中文，换来一个真实的量子电路；它被送进一台真的
+          量子计算机，两分钟后带回一串数据；页面告诉你哪些是电路本该给出的，
+          哪些是机器自己抖出来的噪声。
+        </p>
+        <p class="prose">
+          这条链路上，原本每一环都要专门知识：懂量子力学才写得出电路，
+          懂各家 SDK 才提交得了任务，懂实验物理才读得懂噪声。
+          LoomQ 做的事，就是把这三道门槛收进这一个页面。
+        </p>
+        <p class="prose coda__blunt">
+          说句实话：今天的量子计算机还派不上用场。你刚才连的那台只有两个量子比特，
+          跑最简单的电路都要错掉两成。它现在的处境像 1950 年代占满一整间屋子的
+          电子管计算机——原理成立，工程上还差得远。真正指望它的方向是模拟分子
+          （算新药、新材料）、密码学和某些优化问题，一个都还没到能用的地步。
+        </p>
+        <p class="prose">
+          所以这件作品的价值不在于让你今天就用量子机干成什么活，而在于证明这条路走得通：
+          等这些机器真的能用了，门口不该只站着物理博士。
+        </p>
+      </section>
+
       <button class="btn btn--primary btn--lg" id="btn-cert">生成完成凭证</button>
     </div>
   </section>

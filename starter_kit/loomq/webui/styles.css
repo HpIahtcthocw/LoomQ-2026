@@ -261,6 +261,11 @@ main { position: relative; z-index: 1; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .running b { display: block; font-size: 16px; font-weight: 520; }
+.running__wait {
+  margin-top: calc(var(--s) * 4);
+  font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em;
+  color: var(--warm);
+}
 .running__log {
   list-style: none; margin: calc(var(--s) * 6) auto 0; padding: 0;
   max-width: 52ch; text-align: left;
@@ -344,7 +349,8 @@ main { position: relative; z-index: 1; }
   background: var(--bg-lift);
 }
 .nextbar b { display: block; font-size: 15px; font-weight: 560; margin-bottom: calc(var(--s) * 1); }
-.nextbar span { font-size: 13px; color: var(--text-faint); }
+.nextbar span { font-size: 13px; line-height: 1.7; color: var(--text-faint); }
+.nextbar__act { display: flex; gap: calc(var(--s) * 3); flex-shrink: 0; }
 
 /* ── 提问 ─────────────────────────────────────────────── */
 
@@ -396,7 +402,50 @@ main { position: relative; z-index: 1; }
   font-size: 14px; line-height: 1.8; color: var(--text-dim);
 }
 .quizfoot { margin-top: calc(var(--s) * 8); padding-top: calc(var(--s) * 8); border-top: 1px solid var(--line); }
-.quizfoot .prose { margin-bottom: calc(var(--s) * 7); }
+.quizfoot > .prose { margin-bottom: calc(var(--s) * 7); }
+
+/* 结语。被试跑完全程还是问「这到底有什么用」——体验本身答不了这个问题，
+ * 得有人把话说出来。放在验收之后，是因为此刻他有了亲手做过的经验垫底，
+ * 这段话才接得住；放在开场只会变成没人读的宣传语。 */
+.coda {
+  margin: 0 0 calc(var(--s) * 10);
+  padding: calc(var(--s) * 8);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--cyan);
+  border-radius: var(--radius);
+  background: linear-gradient(150deg, rgba(111, 215, 232, 0.045), transparent 60%);
+}
+.coda__title {
+  margin: 0 0 calc(var(--s) * 5);
+  font-size: 19px; font-weight: 600; letter-spacing: -0.01em;
+}
+.coda .prose { margin-bottom: calc(var(--s) * 5); font-size: 15px; }
+.coda .prose:last-child { margin-bottom: 0; }
+.coda__blunt { color: var(--text-dim); }
+
+/* 开场那段「LoomQ 是什么」。默认收起：零基础用户此刻只想快点开始，
+ * 但想知道自己在用什么的人得有地方看。 */
+.aside {
+  margin-top: calc(var(--s) * 12);
+  padding-top: calc(var(--s) * 6);
+  border-top: 1px solid var(--line-soft);
+  max-width: 68ch;
+}
+.aside summary {
+  cursor: pointer; list-style: none;
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em;
+  color: var(--text-faint);
+  transition: color 0.18s;
+}
+.aside summary::-webkit-details-marker { display: none; }
+.aside summary::before { content: '＋　'; color: var(--cyan); }
+.aside[open] summary::before { content: '－　'; }
+.aside summary:hover { color: var(--cyan); }
+.aside p {
+  margin: calc(var(--s) * 5) 0 0;
+  font-size: 14.5px; line-height: 1.85; color: var(--text-dim);
+  text-wrap: pretty;
+}
 
 /* ── 侧栏 ─────────────────────────────────────────────── */
 
