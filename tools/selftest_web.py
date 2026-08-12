@@ -291,6 +291,19 @@ def test_assets() -> None:
     check("每道题都有正确答案", len(re.findall(r"^\s+right: \d", js, re.MULTILINE)) == 3)
     check("每道题都写了解析", len(re.findall(r"^\s+why: '", js, re.MULTILINE)) == 3)
 
+    # 收尾那段话曾经写死"它被送进一台真的量子计算机"。真机会整片下线，那天所有人
+    # 都会在最后读到一段自己没做过的事。全篇的收尾陈词上撒一个能被当场戳穿的谎，
+    # 前面攒的信任一次赔光——所以这两段必须留空、由 paintCoda 按实际经历填。
+    for node in ("coda-did", "coda-blunt"):
+        check("%s 在 HTML 里是空的" % node, 'id="%s"></p>' % node in html)
+    coda = re.search(r"function paintCoda\(\)\s*\{(.*?)\n\}", js, re.S)
+    check("有 paintCoda", bool(coda))
+    if coda:
+        body = coda.group(1)
+        check("收尾按是否真跑过真机分开写", "state.ranHardware" in body)
+        check("收尾按是否自己提过需求分开写", "state.askedOwn" in body)
+        check("没跑真机时不说送进了真机", "没走成" in body)
+
 
 def main() -> int:
     print("=== LoomQ 网页入口离线自测（不联网、不用模型、不碰真机）===")

@@ -30,7 +30,7 @@ $shots = @(
   @{ q = '?stage=pick&clock=41';            f = '02-pick';     w = 1600; h = 1000 }
   @{ q = '?example=1&clock=68';             f = '03-result';   w = 1600; h = 1400 }
   @{ q = '?stage=ask&clock=95';             f = '04-ask';      w = 1600; h = 1000 }
-  @{ q = '?answers=1,0,2&clock=214';        f = '05-quiz';     w = 1600; h = 1500 }
+  @{ q = '?answers=1,0,2&clock=214';        f = '05-quiz';     w = 1600; h = 2400 }
   @{ q = '?answers=1,0,2&clock=214&cert=1'; f = '06-cert';     w = 1600; h = 1100 }
   @{ q = '?example=1&clock=68';             f = '07-mobile';   w = 412;  h = 1500 }
 )
