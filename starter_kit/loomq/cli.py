@@ -57,19 +57,21 @@ WELCOME = """
 
 三句话讲清这件事：
 
-  1. 普通计算机的一个比特，同一时刻只能是 0 或 1。
-     量子比特可以同时「既是 0 又是 1」，直到你去测量它的那一刻。
+  1. 普通计算机里的一个「比特」，同一时刻只能是 0 或 1。
+     量子计算机里的比特可以同时「既是 0 又是 1」，
+     直到你去看它的那一刻，才随机定成其中一个。
 
-  2. 所谓写量子程序，就是排一串操作去摆布这些比特，最后测量。
-     每次测量只给一个答案，所以要重复很多次，看的是结果的分布。
+  2. 所谓写量子程序，就是排好一串操作去摆布这些比特，最后把它们读出来。
+     这一串操作画成图叫「电路」，其中一步叫「门」，读出来那一下叫「测量」。
+     每读一次只得到一个答案，所以要重复很多遍，看哪个答案出现得多。
 
-  3. 你接下来会看到三样东西：电路图（做了什么）、
-     结果分布（测出了什么）、一段人话解释（这意味着什么）。
+  3. 每跑一次你都会看到同样的三段：机器按顺序做了哪几步、
+     每种答案各出现了多少次、这个结果说明了什么。
 
 不知道从哪开始？直接输入 1、2 或 3 试试现成的例子：
-  1  做一个两比特的贝尔态（最简单的纠缠）
-  2  做一个三比特的 GHZ 态（三个比特命运绑在一起）
-  3  在八个抽屉里找出正确的那个（Grover 搜索）
+  1  让两个比特永远给出一样的答案（学名：贝尔态）
+  2  让三个比特一起同进同退（学名：GHZ 态）
+  3  在八个抽屉里找出藏东西的那一个（学名：Grover 搜索）
 
 输入 help 看更多命令，输入 quit 退出。
 """
@@ -84,9 +86,16 @@ WELCOME_HARDWARE = """
 
 # 没配模型 key 时的兜底示例库。评委不一定配了 LOOMQ_LLM_*，
 # 但流程必须仍然能完整走通——这是"一条命令跑起来"的底线。
-BUILTIN_EXAMPLES: Dict[str, Tuple[str, str, str]] = {
+#
+# 四元组：人话标题、QASM、解释、学名。
+#
+# 标题原本直接写"两比特贝尔态"。实测被试的原话是"基本都没看懂"——他不是笨，
+# 是这个标题对没学过的人不承载任何信息，看见它只知道自己不该看懂。所以把
+# 说人话的那句放到标题位，学名退到副标题：先让人知道这东西在干什么，
+# 再告诉他行内管这叫什么。术语不删，删了他之后去查都没得查。
+BUILTIN_EXAMPLES: Dict[str, Tuple[str, str, str, str]] = {
     "1": (
-        "两比特贝尔态",
+        "让两个比特永远给出一样的答案",
         """OPENQASM 2.0;
 include "qelib1.inc";
 qreg q[2];
@@ -96,11 +105,13 @@ cx q[0],q[1];
 measure q[0] -> c[0];
 measure q[1] -> c[1];
 """,
-        "先让第一个比特进入「既是 0 又是 1」的状态，再用一个受控非门把第二个比特绑上去。"
-        "结果只会是 00 或 11，各一半——两个比特永远同面。",
+        "先让第一个比特进入「既是 0 又是 1」的状态，再用一步操作把第二个比特拴在它身上"
+        "（这步操作行内叫「受控非门」：只有第一个比特是 1 的时候，才去翻转第二个）。"
+        "结果只会是 00 或 11，各一半——两个比特永远同面，测出一个就知道另一个。",
+        "学名：两比特贝尔态",
     ),
     "2": (
-        "三比特 GHZ 态",
+        "让三个比特一起同进同退",
         """OPENQASM 2.0;
 include "qelib1.inc";
 qreg q[3];
@@ -112,11 +123,12 @@ measure q[0] -> c[0];
 measure q[1] -> c[1];
 measure q[2] -> c[2];
 """,
-        "把贝尔态的思路再往下传一级：第一个比特带上第二个，第二个再带上第三个。"
-        "三个比特要么全 0，要么全 1。",
+        "把上一个例子的做法再往下传一级：第一个比特拴住第二个，第二个再拴住第三个。"
+        "于是三个比特要么全是 0，要么全是 1，不会出现有的 0 有的 1。",
+        "学名：三比特 GHZ 态",
     ),
     "3": (
-        "Grover 搜索（8 个抽屉里找 111）",
+        "八个抽屉里找出藏东西的那一个",
         """OPENQASM 2.0;
 include "qelib1.inc";
 qreg q[3];
@@ -146,15 +158,17 @@ measure q[0] -> c[0];
 measure q[1] -> c[1];
 measure q[2] -> c[2];
 """,
-        "8 个抽屉，经典办法平均要开 4 次。这个电路先让所有抽屉同时被看到，"
-        "再用干涉把正确答案的概率放大——一轮之后，111 的概率就从 12.5% 涨到约 78%。",
+        "8 个抽屉里有 1 个藏了东西，普通办法平均要拉开 4 个才撞上。"
+        "这个做法先让 8 个抽屉同时被看一眼，再把「猜对」的那一种可能性放大、"
+        "其余的压小——只放大一轮，答对的机会就从 12.5% 涨到约 78%。",
+        "学名：Grover 搜索，要找的是 111 号抽屉",
     ),
 }
 
 DEMO_TASKS = [
-    ("1", "让两个量子比特纠缠在一起，看它们永远同面"),
-    ("2", "把纠缠扩展到三个比特"),
-    ("3", "用量子干涉在八个可能里放大正确答案"),
+    ("1", "让两个比特绑在一起，看它们永远给出一样的答案"),
+    ("2", "把这种绑定扩展到三个比特"),
+    ("3", "在八种可能里把正确答案的概率放大"),
 ]
 
 
@@ -289,11 +303,20 @@ def _run_on_hardware(circuit, shots: int) -> Tuple[Dict[str, int], str, bool]:
     )
 
 
-def present(title: str, qasm: str, explanation: str, target: str, shots: int) -> None:
+def present(
+    title: str,
+    qasm: str,
+    explanation: str,
+    target: str,
+    shots: int,
+    term: str = "",
+) -> None:
     """完整呈现一次实验：电路图 → 运行 → 分布 → 人话解释。"""
     _print()
     _print("─" * 66)
     _print("【%s】" % title)
+    if term:
+        _print(term)
     _print("─" * 66)
 
     if explanation:
@@ -472,8 +495,8 @@ def interactive(target: str, shots: int) -> int:
             continue
 
         if raw in BUILTIN_EXAMPLES:
-            title, qasm, explanation = BUILTIN_EXAMPLES[raw]
-            present(title, qasm, explanation, target, shots)
+            title, qasm, explanation, term = BUILTIN_EXAMPLES[raw]
+            present(title, qasm, explanation, target, shots, term)
             continue
 
         if not os.environ.get("LOOMQ_LLM_API_KEY"):
@@ -494,10 +517,10 @@ def demo(target: str, shots: int) -> int:
     _print()
     _print("=== 现场体验：三个任务，依次跑完 ===")
     for key, intent in DEMO_TASKS:
-        title, qasm, explanation = BUILTIN_EXAMPLES[key]
+        title, qasm, explanation, term = BUILTIN_EXAMPLES[key]
         _print()
         _print("任务：%s" % intent)
-        present(title, qasm, explanation, target, shots)
+        present(title, qasm, explanation, target, shots, term)
     _print("=" * 66)
     _print("三个任务全部完成。整个过程没有要求你写一行代码，也没有用到任何量子物理知识。")
     _print("这就是 LoomQ 想做的事：把门槛降到「能用中文说出想法」这一步。")

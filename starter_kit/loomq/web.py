@@ -124,6 +124,9 @@ def layout_circuit(circuit: Circuit) -> Dict[str, Any]:
         "n_clbits": circuit.n_clbits,
         "depth": circuit.depth_estimate(),
         "n_gates": len(circuit.gates()),
+        # 图上画了几个方块要对得上文字，否则用户数一遍发现对不上，
+        # 只会怀疑是不是自己看错了。测量画成方块，就得单独报出来。
+        "n_measures": sum(1 for op in circuit.ops if isinstance(op, Measure)),
         "columns": columns,
     }
 
@@ -175,7 +178,9 @@ def _execute(
     结果，会以为是自己操作错了。谁主动要过真机，谁就有权知道为什么没跑成。
     """
     if target == "refsim":
-        return sample(circuit, shots), "内置参考模拟器", False, None
+        # 这行字直接印在结果页最显眼的位置，是零基础用户第一眼看到的东西。
+        # "参考模拟器""兜底"都是行话，换成他一眼知道是什么的说法。
+        return sample(circuit, shots), "普通电脑模拟出来的结果", False, None
 
     if target == "spinq_cloud":
         _note(job_id, "正在连接真实的量子计算机…")
@@ -185,7 +190,7 @@ def _execute(
             )
         except backend_module.SpinQCloudPending as exc:
             _note(job_id, "%s 任务编号 %s 已存下，先用模拟器把流程走完。" % (exc, exc.task_code))
-            return sample(circuit, shots), "内置参考模拟器（真机仍在排队）", False, {
+            return sample(circuit, shots), "普通电脑模拟（真机还在排队）", False, {
                 "title": "真机还在排队，先给你看模拟器的结果",
                 "detail": "%s 任务编号 %s 已经存下来了，排到之后可以在 cloud.spinq.cn 用这个编号查。"
                           % (exc, exc.task_code),
@@ -193,21 +198,28 @@ def _execute(
             }
         except backend_module.BackendUnavailable as exc:
             _note(job_id, "连不上真机：%s" % exc)
-            oversize = circuit.n_qubits > 3
-            if oversize:
-                _note(job_id, "在线的真机只有 2 比特和 3 比特两台，装不下这个电路。这是真机的规模限制，不是你的电路有问题。")
-            return sample(circuit, shots), "内置参考模拟器（真机不可用时的兜底）", False, {
+            reason = str(exc)
+            # 三种原因给的是三句不同的话。以前不管为什么连不上，都统一告诉用户
+            # "真机常常一台都不在线"——账号没配的时候这句话是错的，机器可能好好开着，
+            # 是这台电脑压根没去敲门。把错的理由讲得很体贴，比不讲更糟。
+            if "凭据" in reason or "LOOMQ_SPINQ" in reason:
+                hint = ("这台电脑还没配量旋云的账号，所以根本没连上去，谈不上机器在不在线。"
+                        "配好账号之后，同一个按钮就会把这个电路送上真机。")
+            elif circuit.n_qubits > 3:
+                _note(job_id, "在线的真机装不下这个电路。这是真机的规模限制，不是你的电路有问题。")
+                hint = ("在线的真机最多只有几个比特，装不下这个电路。"
+                        "这是今天真机的规模限制，不是你的电路有问题。")
+            else:
+                hint = ("真机只有 2 到 8 个比特，还要维护、校准，随时可能一台都不在线。"
+                        "这不是你操作错了，也不是程序坏了——真实量子计算机现在就是这么稀缺。")
+            return sample(circuit, shots), "普通电脑模拟（真机没连上，用它顶上）", False, {
                 "title": "这次没能跑到真机上，结果来自模拟器",
-                "detail": str(exc),
-                "hint": "真机只有 2 到 8 个比特，还要维护、校准，随时可能一台都不在线。"
-                        "这不是你操作错了，也不是程序坏了——真实量子计算机现在就是这么稀缺。"
-                        if not oversize else
-                        "在线的真机最多只有几个比特，装不下这个电路。"
-                        "这是今天真机的规模限制，不是你的电路有问题。",
+                "detail": reason,
+                "hint": hint,
             }
         except Exception as exc:  # noqa: BLE001
             _note(job_id, "真机运行出了状况：%s: %s" % (type(exc).__name__, exc))
-            return sample(circuit, shots), "内置参考模拟器（真机报错时的兜底）", False, {
+            return sample(circuit, shots), "普通电脑模拟（真机中途出错，用它顶上）", False, {
                 "title": "真机中途出了状况，结果来自模拟器",
                 "detail": "%s: %s" % (type(exc).__name__, exc),
                 "hint": "电路本身没问题，模拟器用同一份电路把结果算了出来。过一会儿可以再试一次真机。",
@@ -224,15 +236,16 @@ def _execute(
         payload = backend_module.execute(circuit, target, shots)
         return payload["counts"], "%s（任务 %s）" % (payload["backend"], payload["job_id"]), False, None
     except backend_module.BackendUnavailable as exc:
-        _note(job_id, "%s 已自动改用内置参考模拟器。" % exc)
-        return sample(circuit, shots), "内置参考模拟器（后端不可用时的兜底）", False, {
+        _note(job_id, "%s 已自动改用内置模拟器。" % exc)
+        return sample(circuit, shots), "普通电脑模拟（选的那个环境没装上，用它顶上）", False, {
             "title": "选的那个后端没装上，结果来自内置模拟器",
             "detail": str(exc),
             "hint": "内置模拟器不需要装任何东西，算的是同一个电路。",
         }
 
 
-def _run_job(job_id: str, title: str, qasm: str, explanation: str, target: str, shots: int) -> None:
+def _run_job(job_id: str, title: str, qasm: str, explanation: str, target: str,
+             shots: int, term: str = "") -> None:
     try:
         circuit = parse(qasm)
     except (QasmError, ValueError) as exc:
@@ -251,6 +264,7 @@ def _run_job(job_id: str, title: str, qasm: str, explanation: str, target: str, 
 
     result: Dict[str, Any] = {
         "title": title,
+        "term": term,
         "qasm": qasm,
         "explanation": explanation,
         "circuit": layout_circuit(circuit),
@@ -316,13 +330,16 @@ def _state() -> Dict[str, Any]:
         "hardware": hardware_ready(),
         "llm": bool(os.environ.get("LOOMQ_LLM_API_KEY")),
         "backends": [
-            {"id": "refsim", "name": "内置参考模拟器", "ready": True,
-             "note": "精确计算，立刻出结果，无需安装任何东西"},
-            {"id": "spinq", "name": "量旋 SpinQit 模拟器", "ready": bool(installed.get("spinq")), "note": ""},
-            {"id": "braket", "name": "AWS Braket 模拟器", "ready": bool(installed.get("braket")), "note": ""},
-            {"id": "originq", "name": "本源 pyqpanda 模拟器", "ready": bool(installed.get("originq")), "note": ""},
-            {"id": "spinq_cloud", "name": "量旋云真实量子计算机", "ready": hardware_ready(),
-             "note": "真机，要排队约两分钟"},
+            {"id": "refsim", "name": "普通电脑模拟（内置，不用装任何东西）", "ready": True,
+             "note": "精确计算，立刻出结果"},
+            {"id": "spinq", "name": "量旋 SpinQit 模拟器（也是普通电脑算）",
+             "ready": bool(installed.get("spinq")), "note": ""},
+            {"id": "braket", "name": "AWS Braket 模拟器（也是普通电脑算）",
+             "ready": bool(installed.get("braket")), "note": ""},
+            {"id": "originq", "name": "本源 pyqpanda 模拟器（也是普通电脑算）",
+             "ready": bool(installed.get("originq")), "note": ""},
+            {"id": "spinq_cloud", "name": "真的量子计算机（量旋云上的实机）", "ready": hardware_ready(),
+             "note": "要排队，大约两分钟"},
         ],
         # 顺带把电路结构一起给出去，让卡片上先画一张缩略线路图。
         # 「电路」对没接触过的人是个空词，先看见再点，比点完才第一次看见要好。
@@ -330,6 +347,7 @@ def _state() -> Dict[str, Any]:
             {
                 "key": key,
                 "title": value[0],
+                "term": value[3],
                 "explanation": value[2],
                 "circuit": layout_circuit(parse(value[1])),
             }
@@ -424,7 +442,7 @@ class Handler(BaseHTTPRequestHandler):
             if not entry:
                 self._json({"error": "没有这个例子"}, 400)
                 return
-            args = (job_id, entry[0], entry[1], entry[2], target, shots)
+            args = (job_id, entry[0], entry[1], entry[2], target, shots, entry[3])
             threading.Thread(target=_run_job, args=args, daemon=True).start()
         elif body.get("question"):
             question = str(body["question"]).strip()[:300]

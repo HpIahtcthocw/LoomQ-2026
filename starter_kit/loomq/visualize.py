@@ -266,8 +266,8 @@ def explain_distribution(distribution: Mapping[str, float], n_shots: Optional[in
         parts.append("主要就两种结果，各占大约一半——像抛一枚硬币，但两个答案都是合法的。")
     elif outcomes == possible and max(normalized.values()) - min(normalized.values()) < 0.02:
         parts.append(
-            "%d 种可能的结果全都出现了，而且概率几乎相同——这是完全的均匀叠加，"
-            "相当于同时问了所有问题。" % possible
+            "%d 种可能的结果全都出现了，而且概率几乎相同——相当于把所有答案"
+            "同时摆在了台面上，行内把这个状态叫「均匀叠加」。" % possible
         )
     else:
         parts.append("一共出现 %d 种结果（全部可能是 %d 种），最常见的是 %s，占 %.1f%%。"
@@ -279,19 +279,24 @@ def explain_distribution(distribution: Mapping[str, float], n_shots: Optional[in
         if has_noise:
             parts.append(
                 "关键在于中间那些结果（比如 %s、%s）几乎不出现：%d 个比特要么全是 0，"
-                "要么全是 1，从不各行其是。这就是「纠缠」——它们的命运被绑在了一起。"
+                "要么全是 1，从不各行其是。行内把这种关系叫「纠缠」——"
+                "不是它们事先商量好了，而是你读出其中一个的那一刻，另一个同时就定了。"
                 % (middle[0], middle[1], width)
             )
         else:
             parts.append(
                 "注意中间那些结果（比如 %s、%s）一次都没出现：%d 个比特要么全是 0，"
-                "要么全是 1，从不各行其是。这就是「纠缠」——它们的命运被绑在了一起。"
+                "要么全是 1，从不各行其是。行内把这种关系叫「纠缠」——"
+                "不是它们事先商量好了，而是你读出其中一个的那一刻，另一个同时就定了。"
                 % (middle[0], middle[1], width)
             )
 
     missing = possible - outcomes
     if 0 < missing < possible and outcomes > 2 and top_probability < 0.85:
-        parts.append("有 %d 种结果的概率是零，它们被电路的干涉效应抵消掉了。" % missing)
+        parts.append(
+            "有 %d 种结果一次都不会出现：电路把通向它们的那几条路互相抵消掉了，"
+            "就像两列波峰谷相对撞在一起变成平的，行内把这个叫「干涉」。" % missing
+        )
 
     if n_shots:
         parts.append(
@@ -369,13 +374,20 @@ def explain_hardware_noise(
 
 
 def bitstring_legend(width: int) -> str:
-    """告诉用户位串怎么读——这是新手最容易搞错的地方。"""
-    positions = " ".join("c[%d]" % index for index in range(width - 1, -1, -1))
+    """告诉用户这串 0/1 怎么读——这是新手最容易搞错的地方。
+
+    原先这段直接写 "从左到右依次是 c[1] c[0]"。c[0] 是程序里的写法，
+    对没写过代码的人是三个没有含义的符号；而这段的全部作用就是让他知道
+    左边那位对应哪个比特。所以按人话讲一遍，编号写法留在括号里给要对照的人。
+    """
     example = "1" + "0" * (width - 1)
+    positions = " ".join("c[%d]" % index for index in range(width - 1, -1, -1))
     return (
-        "位串读法：从左到右依次是 %s，最右边那一位才是 c[0]。\n"
-        "例如 %s 表示 c[%d]=1，其余为 0。"
-        % (positions, example, width - 1)
+        "这串 0 和 1 怎么读：一位对应一个比特，%d 个比特就是 %d 位。"
+        "最左边那位是最后一个比特（第 %d 号），最右边那位是第 0 号，从右往左数。\n"
+        "比如读到 %s，意思是第 %d 号比特是 1，其余都是 0。"
+        "（程序里这几位分别写作 %s）"
+        % (width, width, width - 1, example, width - 1, positions)
     )
 
 

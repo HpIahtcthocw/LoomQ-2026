@@ -115,6 +115,7 @@ async function boot() {
     <button class="card" data-example="${ex.key}">
       <span class="card__n">EXAMPLE ${String(i + 1).padStart(2, '0')}</span>
       <span class="card__title">${ex.title}</span>
+      <span class="card__term">${ex.term || ''}</span>
       <span class="card__wire"></span>
       <span class="card__desc">${ex.explanation}</span>
       <span class="card__go">点这里运行 →</span>
@@ -296,6 +297,8 @@ function show(r) {
   $('r-backend').textContent = r.on_hardware ? '真实量子计算机 · ' + r.backend_note : r.backend_note;
   $('r-backend').dataset.hw = r.on_hardware ? '1' : '0';
   $('r-title').textContent = r.title;
+  $('r-term').textContent = r.term || '';
+  $('r-term').hidden = !r.term;
   $('r-intent').textContent = r.explanation || '';
 
   // 他点了真机却拿到模拟器结果时，得当面把原因讲清楚，
@@ -313,10 +316,14 @@ function show(r) {
   $('r-circuit').innerHTML = '';
   $('r-circuit').appendChild(drawCircuit(r.circuit));
   $('r-meta').textContent =
-    `${r.circuit.n_qubits} 个量子比特 · ${r.circuit.n_gates} 个门 · 线路深度 ${r.circuit.depth}`;
+    `用了 ${r.circuit.n_qubits} 个比特 · 图上是 ${r.circuit.n_gates} 步操作`
+    + `加最后 ${r.circuit.n_measures} 个读数方块（写着 M 的那种） · `
+    + `最忙的那个比特要走 ${r.circuit.depth} 步（行内把这个叫「线路深度」，步数越多越容易出错）`;
 
   $('r-shots').textContent =
-    `重复测量了 ${r.shots} 次。每一条是一种可能的结果，长度是它出现的比例。`;
+    `同一个电路从头到尾跑了 ${r.shots} 遍，每遍最后都读出一串 0 和 1。`
+    + `下面一条就是一种读数，条越长说明这种读数出现得越多。`
+    + `跑这么多遍是因为量子的结果本来就是随机的，只看一遍什么也说明不了。`;
   drawBars(r);
   $('r-legend').textContent = r.legend;
 

@@ -131,7 +131,9 @@ def test_fallback() -> None:
     finally:
         web.backend_module.execute = original
     check("后端没装也能兜住", sum(counts.values()) == 64 and not on_hw)
-    check("兜底时说明自己是模拟器", "模拟器" in note)
+    # 断言的是"用户能看出这不是真机"，不是某个固定词。文案会为了让人看懂而改，
+    # 这条底线不能跟着改。
+    check("兜底时讲明结果不是真机跑的", "模拟" in note)
     check("兜底带上原因", bool(fallback and fallback["title"] and fallback["hint"]))
 
     html = (web.WEBUI / "index.html").read_text(encoding="utf-8")

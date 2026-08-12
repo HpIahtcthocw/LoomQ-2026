@@ -154,6 +154,23 @@ SPINQ_CLOUD_PLATFORMS = (
     ("sqc_25_vp", 25),
 )
 
+# 代号读给用户听等于没说。留代号是为了对得上云平台后台，前面补一个认得出的名字。
+SPINQ_CLOUD_NAMES = {
+    "gemini_vp": "双子座 Gemini",
+    "triangulum_vp": "三角座 Triangulum",
+    "hercules_vp": "武仙座 Hercules",
+    "superconductor_vp": "超导机",
+    "sqc_25_vp": "超导机 25 比特",
+    "simulator": "云端模拟器",
+}
+
+
+def platform_label(code: str, max_bitnum: int) -> str:
+    name = SPINQ_CLOUD_NAMES.get(code)
+    if not name:
+        return "%s（%d 比特）" % (code, max_bitnum)
+    return "%s（%d 比特，代号 %s）" % (name, max_bitnum, code)
+
 
 class SpinQCloudPending(RuntimeError):
     """任务已提交但还没出结果。带上 task_code，便于稍后凭编号取回。"""
@@ -217,16 +234,31 @@ def _pick_platform(backend, n_qubits: int, requested: Optional[str]) -> str:
         if platform.max_bitnum >= n_qubits and platform.available():
             candidates.append((platform.max_bitnum, known.get(platform.code, 99), platform.code))
     if not candidates:
+        # 「一台机器都没开着」和「机器开着但太小」是两回事，混成一句
+        # "没有平台能装下 N 比特" 会让人以为是自己的电路太大——而 2 比特的电路
+        # 配着一台 2 比特的机器，这句话读起来就是自相矛盾的。分开说。
+        platforms = list(getattr(backend, "_platforms", []) or [])
+        if not platforms:
+            raise BackendUnavailable("服务端没有返回任何平台，可能是账号权限或接口变了")
+
+        online = [item for item in platforms if item.available()]
+        listing = "、".join(
+            platform_label(item.code, item.max_bitnum) for item in platforms
+        )
+        if not online:
+            raise BackendUnavailable(
+                "量旋云上现在一台机器都没开着，%d 个平台在线台数全是 0：%s。"
+                "机器会上下线，过一会儿再试" % (len(platforms), listing)
+            )
         raise BackendUnavailable(
-            "没有任何在线平台能装下 %d 比特的电路。可用平台：%s"
+            "在线的机器最大只有 %d 个比特，装不下这个 %d 比特的电路。"
+                "当前在线：%s"
             % (
+                max(item.max_bitnum for item in online),
                 n_qubits,
-                ", ".join(
-                    "%s(%d 比特, %d 台在线)"
-                    % (item.code, item.max_bitnum, item.machine_count)
-                    for item in (getattr(backend, "_platforms", []) or [])
-                )
-                or "（服务端未返回任何平台）",
+                "、".join(
+                    platform_label(item.code, item.max_bitnum) for item in online
+                ),
             )
         )
     candidates.sort()
