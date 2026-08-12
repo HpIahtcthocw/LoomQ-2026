@@ -27,6 +27,7 @@ const state = {
   ran: 0,
   askedOwn: false,
   ranHardware: false,
+  hardwareDown: false,
   last: null,
   quiz: { picked: {}, right: 0 },
   backends: [],
@@ -114,9 +115,15 @@ async function boot() {
     <button class="card" data-example="${ex.key}">
       <span class="card__n">EXAMPLE ${String(i + 1).padStart(2, '0')}</span>
       <span class="card__title">${ex.title}</span>
+      <span class="card__wire"></span>
       <span class="card__desc">${ex.explanation}</span>
       <span class="card__go">点这里运行 →</span>
     </button>`).join('');
+  // 「电路」对没接触过的人是个空词。先在卡片上画出来，点进去才不是从零开始。
+  $('cards').querySelectorAll('.card__wire').forEach((slot, i) => {
+    const layout = info.examples[i] && info.examples[i].circuit;
+    if (layout) slot.appendChild(drawCircuit(layout, MINI));
+  });
 
   $('sel-backend').innerHTML = info.backends
     .map((b) => `<option value="${b.id}" ${b.ready ? '' : 'disabled'}>${b.name}${b.ready ? '' : '（不可用）'}</option>`)
@@ -264,6 +271,7 @@ function fail(message) {
   $('r-backend').dataset.hw = '0';
   $('r-title').textContent = '这一次没成功';
   $('r-intent').textContent = message;
+  $('r-fallback').hidden = true;
   $('r-circuit').innerHTML = '';
   $('r-bars').innerHTML = '';
   $('r-meta').textContent = '';
@@ -289,6 +297,18 @@ function show(r) {
   $('r-backend').dataset.hw = r.on_hardware ? '1' : '0';
   $('r-title').textContent = r.title;
   $('r-intent').textContent = r.explanation || '';
+
+  // 他点了真机却拿到模拟器结果时，得当面把原因讲清楚，
+  // 否则这一屏和普通模拟器结果长得一模一样，只会让人以为是自己按错了。
+  const fb = r.fallback;
+  if (fb) state.hardwareDown = true;
+  $('r-fallback').hidden = !fb;
+  if (fb) {
+    $('r-fallback-title').textContent = fb.title;
+    $('r-fallback-hint').textContent = fb.hint || '';
+    $('r-fallback-detail').textContent = fb.detail || '';
+    $('r-fallback-detail').hidden = !fb.detail;
+  }
 
   $('r-circuit').innerHTML = '';
   $('r-circuit').appendChild(drawCircuit(r.circuit));
@@ -344,7 +364,9 @@ function paintNext() {
     alt.onclick = fn;
   };
 
-  if (hwReady && !state.ranHardware) {
+  // 真机试过一次却没跑成（云上一台在线的都没有），就别再把它当主按钮劝下去了。
+  // 反复点同一个按钮撞同一堵墙，比一开始就没有这个按钮更让人泄气。
+  if (hwReady && !state.ranHardware && !state.hardwareDown) {
     $('next-title').textContent = state.ran === 1
       ? '你已经跑完了人生第一个量子实验'
       : '到这里为止，跑的都是模拟器';
@@ -354,6 +376,17 @@ function paintNext() {
     btn.textContent = '送到真机上跑';
     btn.onclick = toHardware;
     setAlt(state.askedOwn ? '去验收' : '先自己说一个', state.askedOwn ? toQuiz : toAsk);
+    return;
+  }
+
+  if (state.hardwareDown && !state.ranHardware && !state.askedOwn) {
+    $('next-title').textContent = '真机这会儿没在线，流程照走';
+    $('next-note').textContent =
+      `用时 ${elapsedText()}。上面那段已经说了原因。真机什么时候能排上不由我们决定，` +
+      '但接下来这步不用等它——用你自己的话说一个电路。';
+    btn.textContent = '换我自己说一个';
+    btn.onclick = toAsk;
+    setAlt('再试一次真机', toHardware);
     return;
   }
 
@@ -376,7 +409,8 @@ function paintNext() {
 
 /* ── 电路图 ─────────────────────────────────────────── */
 
-const COL_W = 80, ROW_H = 70, PAD_L = 68, PAD_T = 30, BOX = 44;
+const FULL = { colW: 80, rowH: 70, padL: 68, padT: 30, box: 44, wire: 14, label: 14, mini: false };
+const MINI = { colW: 34, rowH: 30, padL: 26, padT: 12, box: 20, wire: 6, label: 9, mini: true };
 const NS = 'http://www.w3.org/2000/svg';
 
 function el(name, attrs = {}, text) {
@@ -386,23 +420,26 @@ function el(name, attrs = {}, text) {
   return node;
 }
 
-function drawCircuit(layout) {
+function drawCircuit(layout, s = FULL) {
   const cols = layout.columns.length || 1;
-  const w = PAD_L + cols * COL_W + 30;
-  const h = PAD_T * 2 + layout.n_qubits * ROW_H;
-  const svg = el('svg', { class: 'circuit', width: w, height: h, viewBox: `0 0 ${w} ${h}` });
+  const w = s.padL + cols * s.colW + (s.mini ? 10 : 30);
+  const h = s.padT * 2 + layout.n_qubits * s.rowH;
+  const svg = el('svg', {
+    class: 'circuit', width: w, height: h, viewBox: `0 0 ${w} ${h}`,
+    'aria-hidden': s.mini ? 'true' : 'false',
+  });
 
-  const rowY = (q) => PAD_T + q * ROW_H + ROW_H / 2;
-  const colX = (c) => PAD_L + c * COL_W + COL_W / 2;
+  const rowY = (q) => s.padT + q * s.rowH + s.rowH / 2;
+  const colX = (c) => s.padL + c * s.colW + s.colW / 2;
 
   for (let q = 0; q < layout.n_qubits; q++) {
     svg.appendChild(el('line', {
-      x1: PAD_L - 18, y1: rowY(q), x2: w - 14, y2: rowY(q),
+      x1: s.padL - s.wire - 4, y1: rowY(q), x2: w - s.wire, y2: rowY(q),
       stroke: 'rgba(122,170,214,0.3)', 'stroke-width': 1,
     }));
     svg.appendChild(el('text', {
-      x: PAD_L - 30, y: rowY(q) + 5, 'text-anchor': 'end',
-      fill: '#5d6d84', 'font-size': 14,
+      x: s.padL - s.wire - 12, y: rowY(q) + s.label / 3, 'text-anchor': 'end',
+      fill: '#5d6d84', 'font-size': s.label,
     }, `q${q}`));
   }
 
@@ -413,88 +450,95 @@ function drawCircuit(layout) {
       if (qs.length > 1) {
         svg.appendChild(el('line', {
           x1: x, y1: rowY(Math.min(...qs)), x2: x, y2: rowY(Math.max(...qs)),
-          stroke: 'rgba(111,215,232,0.55)', 'stroke-width': 1.2,
+          stroke: 'rgba(111,215,232,0.55)', 'stroke-width': s.mini ? 1 : 1.2,
         }));
       }
-      svg.appendChild(glyph(item, x, rowY));
+      svg.appendChild(glyph(item, x, rowY, s));
     }
   });
 
   return svg;
 }
 
-function glyph(item, x, rowY) {
-  const g = el('g', { class: 'gatebox' });
-  const hint = item.hint + (item.params && item.params.length ? `（角度 ${item.params.join(', ')}）` : '');
-  g.appendChild(el('title', {}, hint));
+function glyph(item, x, rowY, s) {
+  const g = el('g', { class: s.mini ? '' : 'gatebox' });
+  if (!s.mini) {
+    const hint = item.hint + (item.params && item.params.length ? `（角度 ${item.params.join(', ')}）` : '');
+    g.appendChild(el('title', {}, hint));
+  }
 
   const name = item.name || '';
   const qs = item.qubits;
 
   if (item.kind === 'measure') {
-    box(g, x, rowY(qs[0]), 'M', '#f0a463', 'rgba(240,164,99,0.1)');
-    g.appendChild(el('text', {
-      x, y: rowY(qs[0]) + BOX / 2 + 16, 'text-anchor': 'middle',
-      fill: '#5d6d84', 'font-size': 11,
-    }, `c[${item.clbit}]`));
+    box(g, x, rowY(qs[0]), 'M', '#f0a463', 'rgba(240,164,99,0.1)', s);
+    if (!s.mini) {
+      g.appendChild(el('text', {
+        x, y: rowY(qs[0]) + s.box / 2 + 16, 'text-anchor': 'middle',
+        fill: '#5d6d84', 'font-size': 11,
+      }, `c[${item.clbit}]`));
+    }
     return g;
   }
 
   if (name === 'cx' || name === 'ccx') {
     const target = qs[qs.length - 1];
-    for (const q of qs.slice(0, -1)) dot(g, x, rowY(q));
-    oplus(g, x, rowY(target));
+    for (const q of qs.slice(0, -1)) dot(g, x, rowY(q), s);
+    oplus(g, x, rowY(target), s);
     return g;
   }
   if (name === 'swap') {
-    for (const q of qs) cross(g, x, rowY(q));
+    for (const q of qs) cross(g, x, rowY(q), s);
     return g;
   }
   if (name === 'cu1') {
-    dot(g, x, rowY(qs[0]));
-    box(g, x, rowY(qs[1]), 'U1', '#6fd7e8', 'rgba(11,18,32,0.98)');
+    dot(g, x, rowY(qs[0]), s);
+    box(g, x, rowY(qs[1]), 'U1', '#6fd7e8', 'rgba(11,18,32,0.98)', s);
     return g;
   }
 
-  box(g, x, rowY(qs[0]), item.label, '#6fd7e8', 'rgba(11,18,32,0.98)');
-  if (item.params && item.params.length) {
+  box(g, x, rowY(qs[0]), item.label, '#6fd7e8', 'rgba(11,18,32,0.98)', s);
+  if (item.params && item.params.length && !s.mini) {
     g.appendChild(el('text', {
-      x, y: rowY(qs[0]) + BOX / 2 + 15, 'text-anchor': 'middle',
+      x, y: rowY(qs[0]) + s.box / 2 + 15, 'text-anchor': 'middle',
       fill: '#5d6d84', 'font-size': 11,
     }, item.params.join(',')));
   }
   return g;
 }
 
-function box(g, x, y, label, stroke, fill) {
+function box(g, x, y, label, stroke, fill, s) {
   g.appendChild(el('rect', {
     class: 'gatebox__rect',
-    x: x - BOX / 2, y: y - BOX / 2 + 2, width: BOX, height: BOX - 4, rx: 3,
-    fill, stroke, 'stroke-width': 1.1,
+    x: x - s.box / 2, y: y - s.box / 2 + 2, width: s.box, height: s.box - 4, rx: 3,
+    fill, stroke, 'stroke-width': s.mini ? 1 : 1.1,
   }));
   g.appendChild(el('text', {
-    x, y: y + 6, 'text-anchor': 'middle', fill: '#e4ebf4',
-    'font-size': label.length > 2 ? 13 : 17,
+    x, y: y + (s.mini ? 3.5 : 6), 'text-anchor': 'middle', fill: '#e4ebf4',
+    'font-size': (label.length > 2 ? 0.3 : 0.39) * s.box,
   }, label));
 }
 
-function dot(g, x, y) {
-  g.appendChild(el('circle', { cx: x, cy: y, r: 5.5, fill: '#6fd7e8' }));
+function dot(g, x, y, s) {
+  g.appendChild(el('circle', { cx: x, cy: y, r: s.box * 0.125, fill: '#6fd7e8' }));
 }
 
-function oplus(g, x, y) {
-  const r = 14;
+function oplus(g, x, y, s) {
+  const r = s.box * 0.32;
+  const wide = s.mini ? 1 : 1.3;
   g.appendChild(el('circle', {
-    cx: x, cy: y, r, fill: 'rgba(5,8,15,0.95)', stroke: '#6fd7e8', 'stroke-width': 1.3,
+    cx: x, cy: y, r, fill: 'rgba(5,8,15,0.95)', stroke: '#6fd7e8', 'stroke-width': wide,
   }));
-  g.appendChild(el('line', { x1: x - r, y1: y, x2: x + r, y2: y, stroke: '#6fd7e8', 'stroke-width': 1.3 }));
-  g.appendChild(el('line', { x1: x, y1: y - r, x2: x, y2: y + r, stroke: '#6fd7e8', 'stroke-width': 1.3 }));
+  g.appendChild(el('line', { x1: x - r, y1: y, x2: x + r, y2: y, stroke: '#6fd7e8', 'stroke-width': wide }));
+  g.appendChild(el('line', { x1: x, y1: y - r, x2: x, y2: y + r, stroke: '#6fd7e8', 'stroke-width': wide }));
 }
 
-function cross(g, x, y) {
+function cross(g, x, y, s) {
+  const r = s.box * 0.2;
   for (const d of [1, -1]) {
     g.appendChild(el('line', {
-      x1: x - 9, y1: y - 9 * d, x2: x + 9, y2: y + 9 * d, stroke: '#6fd7e8', 'stroke-width': 1.5,
+      x1: x - r, y1: y - r * d, x2: x + r, y2: y + r * d,
+      stroke: '#6fd7e8', 'stroke-width': s.mini ? 1.2 : 1.5,
     }));
   }
 }

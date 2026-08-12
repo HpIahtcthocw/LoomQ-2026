@@ -50,6 +50,8 @@ from .visualize import bitstring_legend, explain_distribution, explain_hardware_
 
 WEBUI = Path(__file__).parent / "webui"
 DEFAULT_SHOTS = 1024
+# 界面上能选的运行环境，与 _state() 里给出的那一份保持一致。
+KNOWN_BACKENDS = ("refsim", "spinq", "braket", "originq", "spinq_cloud")
 
 # 门在界面上的显示名与配色分类。IR 里 12 个白名单门加一个只由分解产生的 u1。
 GATE_LABEL = {
@@ -159,15 +161,21 @@ def _fail(job_id: str, message: str) -> None:
 # --- 执行 -------------------------------------------------------------------
 
 
-def _execute(circuit: Circuit, target: str, shots: int, job_id: str) -> Tuple[Dict[str, int], str, bool]:
-    """跑一次电路，返回 (counts, 后端说明, 是否真机)。
+def _execute(
+    circuit: Circuit, target: str, shots: int, job_id: str
+) -> Tuple[Dict[str, int], str, bool, Optional[Dict[str, str]]]:
+    """跑一次电路，返回 (counts, 后端说明, 是否真机, 回退说明)。
 
     与 cli.run_circuit 同样的兜底策略：任何一步失败都回落到参考模拟器，
     绝不把用户卡在半路——把人卡住的引导不叫引导。区别只在于进度写进任务表
     而不是打印到终端。
+
+    回退说明是第四个返回值：用户是自己点了"送到真机上跑"才走到这里的，
+    如果只把原因写进进度日志，跑完日志一消失，他看到的就只是一个模拟器
+    结果，会以为是自己操作错了。谁主动要过真机，谁就有权知道为什么没跑成。
     """
     if target == "refsim":
-        return sample(circuit, shots), "内置参考模拟器", False
+        return sample(circuit, shots), "内置参考模拟器", False, None
 
     if target == "spinq_cloud":
         _note(job_id, "正在连接真实的量子计算机…")
@@ -177,28 +185,51 @@ def _execute(circuit: Circuit, target: str, shots: int, job_id: str) -> Tuple[Di
             )
         except backend_module.SpinQCloudPending as exc:
             _note(job_id, "%s 任务编号 %s 已存下，先用模拟器把流程走完。" % (exc, exc.task_code))
-            return sample(circuit, shots), "内置参考模拟器（真机仍在排队）", False
+            return sample(circuit, shots), "内置参考模拟器（真机仍在排队）", False, {
+                "title": "真机还在排队，先给你看模拟器的结果",
+                "detail": "%s 任务编号 %s 已经存下来了，排到之后可以在 cloud.spinq.cn 用这个编号查。"
+                          % (exc, exc.task_code),
+                "hint": "下面这张图是模拟器算的理想结果，和真机跑的是同一个电路。",
+            }
         except backend_module.BackendUnavailable as exc:
             _note(job_id, "连不上真机：%s" % exc)
-            if circuit.n_qubits > 3:
+            oversize = circuit.n_qubits > 3
+            if oversize:
                 _note(job_id, "在线的真机只有 2 比特和 3 比特两台，装不下这个电路。这是真机的规模限制，不是你的电路有问题。")
-            return sample(circuit, shots), "内置参考模拟器（真机不可用时的兜底）", False
+            return sample(circuit, shots), "内置参考模拟器（真机不可用时的兜底）", False, {
+                "title": "这次没能跑到真机上，结果来自模拟器",
+                "detail": str(exc),
+                "hint": "真机只有 2 到 8 个比特，还要维护、校准，随时可能一台都不在线。"
+                        "这不是你操作错了，也不是程序坏了——真实量子计算机现在就是这么稀缺。"
+                        if not oversize else
+                        "在线的真机最多只有几个比特，装不下这个电路。"
+                        "这是今天真机的规模限制，不是你的电路有问题。",
+            }
         except Exception as exc:  # noqa: BLE001
             _note(job_id, "真机运行出了状况：%s: %s" % (type(exc).__name__, exc))
-            return sample(circuit, shots), "内置参考模拟器（真机报错时的兜底）", False
+            return sample(circuit, shots), "内置参考模拟器（真机报错时的兜底）", False, {
+                "title": "真机中途出了状况，结果来自模拟器",
+                "detail": "%s: %s" % (type(exc).__name__, exc),
+                "hint": "电路本身没问题，模拟器用同一份电路把结果算了出来。过一会儿可以再试一次真机。",
+            }
         return (
             payload["counts"],
             "真实量子计算机 %s（任务编号 %s，可在 cloud.spinq.cn 查到）"
             % (payload["backend"], payload["job_id"]),
             True,
+            None,
         )
 
     try:
         payload = backend_module.execute(circuit, target, shots)
-        return payload["counts"], "%s（任务 %s）" % (payload["backend"], payload["job_id"]), False
+        return payload["counts"], "%s（任务 %s）" % (payload["backend"], payload["job_id"]), False, None
     except backend_module.BackendUnavailable as exc:
         _note(job_id, "%s 已自动改用内置参考模拟器。" % exc)
-        return sample(circuit, shots), "内置参考模拟器（后端不可用时的兜底）", False
+        return sample(circuit, shots), "内置参考模拟器（后端不可用时的兜底）", False, {
+            "title": "选的那个后端没装上，结果来自内置模拟器",
+            "detail": str(exc),
+            "hint": "内置模拟器不需要装任何东西，算的是同一个电路。",
+        }
 
 
 def _run_job(job_id: str, title: str, qasm: str, explanation: str, target: str, shots: int) -> None:
@@ -209,7 +240,7 @@ def _run_job(job_id: str, title: str, qasm: str, explanation: str, target: str, 
         return
 
     try:
-        counts, backend_note, on_hardware = _execute(circuit, target, shots, job_id)
+        counts, backend_note, on_hardware, fallback = _execute(circuit, target, shots, job_id)
     except Exception as exc:  # noqa: BLE001
         _fail(job_id, "运行失败：%s: %s" % (type(exc).__name__, exc))
         return
@@ -230,6 +261,10 @@ def _run_job(job_id: str, title: str, qasm: str, explanation: str, target: str, 
         "on_hardware": on_hardware,
         "legend": bitstring_legend(width),
     }
+    # 只在用户主动要过真机的时候解释回退。默认走模拟器的人没提过这个要求，
+    # 给他弹一条"真机不可用"只会凭空制造一个他本来没有的问题。
+    if fallback and target == "spinq_cloud":
+        result["fallback"] = fallback
 
     if on_hardware:
         # 真机结果被噪声糊过，光看它讲不清电路的意图。拿 refsim 精确算出的理想分布
@@ -289,8 +324,15 @@ def _state() -> Dict[str, Any]:
             {"id": "spinq_cloud", "name": "量旋云真实量子计算机", "ready": hardware_ready(),
              "note": "真机，要排队约两分钟"},
         ],
+        # 顺带把电路结构一起给出去，让卡片上先画一张缩略线路图。
+        # 「电路」对没接触过的人是个空词，先看见再点，比点完才第一次看见要好。
         "examples": [
-            {"key": key, "title": value[0], "explanation": value[2]}
+            {
+                "key": key,
+                "title": value[0],
+                "explanation": value[2],
+                "circuit": layout_circuit(parse(value[1])),
+            }
             for key, value in BUILTIN_EXAMPLES.items()
         ],
     }
@@ -359,6 +401,13 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         target = body.get("backend") or "refsim"
+        # 后端名要在这里挡住。往下走的话，未知名字会在 backends.execute 里抛
+        # ValueError，被 _run_job 的兜底翻译成一句「运行失败」——那是把一个
+        # 参数错误说成了运行错误，排查的人会去查错方向。
+        if target not in KNOWN_BACKENDS:
+            self._json({"error": "没有这个运行环境：%s" % target}, 400)
+            return
+
         # 不能写 `body.get("shots") or DEFAULT_SHOTS`——0 是假值，会被当成"没传"
         # 而悄悄变成 1024，非法输入反倒跑出了结果。
         shots = body.get("shots")

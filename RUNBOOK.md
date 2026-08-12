@@ -187,7 +187,7 @@ python tools/selftest_agent.py         # L2 Agent，42 项，用本地假端点
 python tools/selftest_explain.py       # 结果解释文案，35 项
 python tools/selftest_hybrid.py        # L3 混合编译，随机程序穷举注入差分
 python tools/selftest_quantum_ext.py   # 量子 RISC-V 扩展，七组端到端测试
-python tools/selftest_web.py           # 网页入口，62 项，起真服务发真请求
+python tools/selftest_web.py           # 网页入口，74 项，起真服务发真请求
 python tools/gen_circuits.py           # 重新生成隐藏电路回归集 + 灵敏度检验
 python tools/run_regression.py         # 回归集跑一遍参考模拟器
 ```
@@ -444,6 +444,14 @@ python tools/fetch_spinq_raw.py     # 需 LOOMQ_SPINQ_USERNAME
    改为自己 `submit_task` + `get_task_result`，能设超时，且**超时也保留 task_code**
    ——真机证据要的就是这个可溯源编号，任务还在排队时不该丢掉它。
 
+**真机会整片下线，这是常态不是故障。** 2026-08-12 晚实测：`platforms` 返回的五个
+平台（`gemini_vp` 2 比特、`triangulum_vp` 3 比特、`hercules_vp` 5 比特、
+`superconductor_vp` 8 比特、`simulator` 24 比特）**在线台数全部为 0**，
+同一份凭据两天前还跑通过（`G-260810-0012`）。演示前先跑一次
+`python tools/run_spinq_cloud.py platforms` 看有没有在线机器，别当场才发现。
+网页入口这时会回退到参考模拟器，并在结果页顶部用橙色块讲清原因、把主按钮从
+"送到真机上跑"换成"换我自己说一个"——回退本身是对的，但不告诉用户就成了故障。
+
 位序**必须为真机独立标定，不能沿用模拟器结论**：云端自动测量是另一条代码路径。
 2026-08-08 实测（`gemini_vp` 任务 `G-260808-0001`、`triangulum_vp` 任务 `S-260808-0001`）：
 非对称探针 `x q[0]` 在 2 比特主峰落 `10`、3 比特主峰落 `100`，即原生位串以 `q[0]` 为
@@ -612,7 +620,7 @@ python starter_kit/prepare_submission.py --team-id <TEAM_ID>
 | `loomq/refsim.py` | 已验证，理想分布对上官方公开值 |
 | `loomq/decompose.py` | 已验证，`selftest_decompose.py` 22 项（含 crz 陷阱的数值反例） |
 | `loomq/visualize.py` `loomq/cli.py` | 已验证，`--demo` 端到端跑通，字符集自动降级；`selftest_explain.py` 35 项 |
-| `loomq/web.py` + `loomq/webui/`（网页入口） | **已实测**，`selftest_web.py` 62 项；真机路径端到端跑通（任务 G-260810-0003） |
+| `loomq/web.py` + `loomq/webui/`（网页入口） | **已实测**，`selftest_web.py` 74 项；真机路径端到端跑通（任务 G-260810-0003） |
 | `loomq/agent.py` | **已接真实模型实测**，`selftest_agent.py` 42 项 + `selftest_l2_live.py` 对标组 24/24 |
 | `loomq/counts.py` | **已实测标定**：spinq/braket/真机需反转，**originq 与约定一致** |
 | `loomq/backends.py` braket / spinq | **已实测**，三处 `[待实测]` 全部关闭 |
@@ -643,7 +651,8 @@ python starter_kit/prepare_submission.py --team-id <TEAM_ID>
 零依赖零配置也能完整跑通。开场引导 → 三个示例 → 中文自由提问 → 真机对照 →
 三道原理验收 → 完成凭证，是对着专项奖那句判据逐项搭的。
 只用标准库 `http.server`，没有给 requirements.txt 增加任何一行。
-八张截图在 `starter_kit/evidence/files/webui/`。
+九张截图在 `starter_kit/evidence/files/webui/`：`08-hardware.png` 是真机在线时的
+对照（任务 `G-260810-0003`），`09-fallback.png` 是真机全部离线时的回退交代。
 
 剩下的只有一件：**找真人做五分钟实测**，记录模板已经写好在
 `starter_kit/evidence/five-minute-test.md`，照着填即可。录演示视频可选。
@@ -668,7 +677,7 @@ python tools/selftest_agent.py                      # L2 Agent 42 项
 python tools/selftest_explain.py                    # 结果解释文案 35 项
 python tools/selftest_hybrid.py                     # L3 混合编译差分（--programs 加压）
 python tools/selftest_quantum_ext.py                # 量子 RISC-V 扩展七组测试
-python tools/selftest_web.py                        # 网页入口 62 项（起真服务发真请求）
+python tools/selftest_web.py                        # 网页入口 74 项（起真服务发真请求）
 python tools/riscv_quantum_emulator.py              # Bonus 最小演示：Bell 态驱动经典分支
 python tools/gen_circuits.py                        # 重新生成回归集 + 灵敏度检验
 python tools/run_regression.py                      # 回归集（参考模拟器）
@@ -683,6 +692,17 @@ cd starter_kit && python -m loomq.cli --demo         # 零基础入口演示（�
 .\tools\shoot_webui.ps1                    # 七张：开场/选例/结果/提问/验收/凭证/手机
 .\tools\shoot_webui.ps1 -Job <任务编号>     # 多截一张真机对照，编号来自跑过的真机任务
 ```
+
+**`-Job` 会覆盖 `08-hardware.png`，而那张是真机在线时才拍得到的证据。**
+真机离线时提交的任务会回退到模拟器，拿那个编号去截图等于把真机证据换成回退截图。
+截之前先确认 `result.on_hardware` 为真；想留回退那一张就另存成 `09-fallback.png`。
+
+**截出来的结果条如果是空的，别去调等待时间，去看谁在动画里改宽度。**
+无头浏览器跑 `--virtual-time-budget` 时动画时钟不推进，CSS 动画会永远停在首帧
+（实测 `playState` 一直是 `running`），`@keyframes grow { from { width: 0 } }`
+这类写法于是把真实宽度盖成 0。这个坑踩过两次：先是 rAF 改 width，后是 keyframes。
+现在宽度只由内联的 `--w` 决定，动画只加在盖不住数据的属性上（`.bar__fill::after` 的扫光）。
+同一条规矩对任何"从无到有"的入场动画都成立。
 
 必须在 `.venv`（3.10 + SDK）里跑：
 

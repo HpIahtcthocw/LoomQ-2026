@@ -311,7 +311,7 @@ CLI 要向零基础用户解释真机结果，最初的实现完全数据驱动�
 - [x] L2 真实模型实测 —— `selftest_l2_live.py` 对标组 24/24（`deepseek-v4-flash`）
 - [x] 电路图 / 直方图 / 人话解释
 - [x] 零基础用户 CLI 入口 —— `python -m loomq.cli --demo` 端到端跑通
-- [x] 零基础用户网页入口 —— `start.ps1` / `start.sh` 一键起服务，`selftest_web.py` 62 项
+- [x] 零基础用户网页入口 —— `start.ps1` / `start.sh` 一键起服务，`selftest_web.py` 74 项
 - [x] 证据包与 `submission.yaml`
 
 真实 SDK 环境（Python 3.10.11 + braket 1.97.0 + spinqit 0.2.4）也已装好并跑通：

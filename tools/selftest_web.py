@@ -98,7 +98,48 @@ def test_state() -> None:
     check("三个内置示例", len(state["examples"]) == 3)
     check("示例都带标题与解释",
           all(e["title"] and e["explanation"] for e in state["examples"]))
+    # 卡片上那张缩略线路图全靠这个字段，掉了的话页面不报错，只是安静地少一张图
+    check("示例都带电路结构（卡片缩略图要用）",
+          all(e.get("circuit", {}).get("columns") for e in state["examples"]))
     check("hardware/llm 是布尔", isinstance(state["hardware"], bool) and isinstance(state["llm"], bool))
+
+
+def test_fallback() -> None:
+    """真机没跑成时必须当面交代原因。
+
+    这条判据是从实测反馈里长出来的：云上一台在线的机器都没有时，
+    回退到模拟器本身是对的，但如果只把原因写进进度日志，用户看到的
+    就是一个和普通模拟器结果一模一样的页面，只会以为是自己按错了。
+    """
+    section("真机回退的交代")
+    bell = parse(web.BUILTIN_EXAMPLES["1"][1])
+    job_id = web._new_job()
+    counts, note, on_hw, fallback = web._execute(bell, "refsim", 64, job_id)
+    check("refsim 正常出结果", sum(counts.values()) == 64 and not on_hw)
+    check("没要过真机就不谈回退", fallback is None)
+
+    # 把 execute 换成必定失败的桩，才能在不装任何第三方 SDK 的机器上
+    # 稳定地走一遍回退分支——这条路平时只有在别人机器上才会被踩到。
+    original = web.backend_module.execute
+
+    def unavailable(*_args, **_kwargs):
+        raise web.backend_module.BackendUnavailable("自测桩：这个后端没装")
+
+    web.backend_module.execute = unavailable
+    try:
+        counts, note, on_hw, fallback = web._execute(bell, "braket", 64, job_id)
+    finally:
+        web.backend_module.execute = original
+    check("后端没装也能兜住", sum(counts.values()) == 64 and not on_hw)
+    check("兜底时说明自己是模拟器", "模拟器" in note)
+    check("兜底带上原因", bool(fallback and fallback["title"] and fallback["hint"]))
+
+    html = (web.WEBUI / "index.html").read_text(encoding="utf-8")
+    for node in ("r-fallback", "r-fallback-title", "r-fallback-hint", "r-fallback-detail"):
+        check("页面留了 %s 的位置" % node, 'id="%s"' % node in html)
+
+    check("界面上的后端都在白名单里",
+          all(b["id"] in web.KNOWN_BACKENDS for b in web._state()["backends"]))
 
 
 # --- HTTP -------------------------------------------------------------------
@@ -188,6 +229,8 @@ def test_http() -> None:
         check("拒绝超大 shots", status == 400, str(payload))
         status, payload = post(base, {})
         check("拒绝空请求", status == 400, str(payload))
+        status, payload = post(base, {"example": "1", "backend": "no_such_backend"})
+        check("拒绝不存在的运行环境", status == 400, str(payload))
 
         try:
             get(base, "/api/job?id=nosuchjob")
@@ -253,6 +296,7 @@ def main() -> int:
     print("=== LoomQ 网页入口离线自测（不联网、不用模型、不碰真机）===")
     test_layout()
     test_state()
+    test_fallback()
     test_http()
     test_assets()
     print("\n%d 通过，%d 失败" % (PASSED, FAILED))

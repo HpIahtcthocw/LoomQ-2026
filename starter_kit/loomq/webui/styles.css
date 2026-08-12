@@ -150,6 +150,16 @@ main { position: relative; z-index: 1; }
 }
 .stage.is-active { display: block; }
 
+/* 内容撑不满一屏的那几页（选例、提问）在 1600×1000 上原本只占顶上三分之一，
+ * 底下三分之二空着，看上去像没加载完。垂直居中之后重心才落在视线里。
+ * 只给短页面加：结果页和验收页内容长，居中反而会把开头推到视口外。 */
+.stage--center.is-active {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: calc(100vh - 74px);
+}
+
 @keyframes rise {
   from { opacity: 0; transform: translateY(14px); }
   to   { opacity: 1; transform: none; }
@@ -249,6 +259,21 @@ main { position: relative; z-index: 1; }
 .card__go { margin-top: auto; font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
 .card:hover .card__go { color: var(--cyan); }
 
+/* 卡片上的缩略线路图。三张卡的电路宽度不一，用等高容器兜住，
+ * 免得卡片被最宽的那张撑得参差不齐。 */
+.card__wire {
+  display: flex; align-items: center;
+  min-height: 96px;
+  margin: calc(var(--s) * -1) 0 calc(var(--s) * 1);
+  padding: calc(var(--s) * 2) 0;
+  opacity: 0.82;
+  transition: opacity 0.2s;
+}
+.card:hover .card__wire { opacity: 1; }
+/* Grover 有十二列，按原尺寸画会顶出卡片。等比缩到卡片宽度即可——
+ * 这里要的是「电路长这样」的印象，不是让人逐个门去读。 */
+.card__wire svg { max-width: 100%; height: auto; }
+
 /* ── 运行中 ───────────────────────────────────────────── */
 
 .running { padding: calc(var(--s) * 18) 0; text-align: center; }
@@ -297,7 +322,17 @@ main { position: relative; z-index: 1; }
 }
 .block__note { margin: 0 0 calc(var(--s) * 6); font-size: 13.5px; line-height: 1.7; color: var(--text-faint); max-width: 66ch; }
 
-.scroller { overflow-x: auto; padding-bottom: calc(var(--s) * 2); }
+/* 电路图原本直接漂在页面底色上，左边贴着正文、右边一大片空，不像一张「图」。
+ * 给它一层承载面板，这一屏的视觉重心才落在电路本身上。 */
+.scroller {
+  overflow-x: auto;
+  padding: calc(var(--s) * 4) calc(var(--s) * 2);
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgba(111, 215, 232, 0.035), rgba(111, 215, 232, 0)) ,
+    var(--bg-sink);
+}
+.scroller > div { display: flex; justify-content: center; min-width: min-content; }
 .meta { margin-top: calc(var(--s) * 4); font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--text-faint); }
 
 .prose { margin: 0; font-size: 15.5px; line-height: 1.9; color: var(--text); max-width: 66ch; }
@@ -308,16 +343,23 @@ main { position: relative; z-index: 1; }
 .bar { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: calc(var(--s) * 4); }
 .bar__key { font-family: var(--mono); font-size: 14px; letter-spacing: 0.14em; color: var(--text); }
 .bar__track { height: 22px; background: var(--bg-sink); border: 1px solid var(--line-soft); border-radius: 2px; position: relative; overflow: hidden; }
-/* 宽度由内联的 --w 决定，动画只是从 0 长到 --w。
- * 早先用 requestAnimationFrame 在下一帧改 width 触发 transition，
- * 结果在无头浏览器里截出来是一排空条——渲染时机一变，数据就没了。
- * 静态值必须自己站得住，动画只能是锦上添花。 */
-@keyframes grow { from { width: 0; } }
+/* 宽度只由内联的 --w 决定，绝不交给动画。
+ * 这条曾经栽过两次：先是 requestAnimationFrame 在下一帧改 width，
+ * 后来换成 @keyframes grow { from { width: 0 } }——两次都在无头截图里
+ * 截出一排空条。根因是浏览器跑虚拟时钟时动画时钟不推进，动画永远停在
+ * 首帧，而首帧恰好把真实宽度盖成了 0。数据的可见性不能依赖动画播完，
+ * 想要动效就只加在盖不住数据的属性上（见下面的扫光）。 */
 .bar__fill {
   position: absolute; inset: 0 auto 0 0;
   background: linear-gradient(90deg, var(--cyan-deep), var(--cyan));
   width: var(--w, 0);
-  animation: grow 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+@keyframes sheen { from { transform: translateX(-100%); } to { transform: translateX(320%); } }
+.bar__fill::after {
+  content: ''; position: absolute; inset: 0; width: 32%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+  animation: sheen 1.1s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .bar[data-hw='1'] .bar__fill { background: linear-gradient(90deg, #6b4525, var(--warm)); }
 /* 理想值的刻度线。它要压在实心条之上——真机条比理想值长的时候，
@@ -326,11 +368,26 @@ main { position: relative; z-index: 1; }
   position: absolute; top: -1px; bottom: -1px; left: 0; z-index: 2;
   border-right: 2px dashed var(--cyan-bright);
   width: var(--w, 0);
-  animation: grow 0.85s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .bar__val { font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 11ch; text-align: right; }
 .bars__key { margin-top: calc(var(--s) * 5); font-size: 12.5px; color: var(--text-dim); display: flex; gap: calc(var(--s) * 6); flex-wrap: wrap; }
 .bars__key i { display: inline-block; width: 22px; height: 0; border-top: 2px dashed var(--cyan-bright); vertical-align: middle; margin-right: 7px; font-style: normal; }
+
+/* 真机没跑成时的交代。用暖色和真机结果同一套配色——
+ * 它讲的是同一件事：真实机器的现状。 */
+.fallback {
+  margin: calc(var(--s) * 7) 0 calc(var(--s) * 10);
+  padding: calc(var(--s) * 5) calc(var(--s) * 6);
+  border: 1px solid rgba(240, 164, 99, 0.3); border-radius: var(--radius);
+  background: rgba(240, 164, 99, 0.05);
+}
+.fallback__title { font-size: 15px; font-weight: 580; color: var(--warm); }
+.fallback__hint { margin: calc(var(--s) * 2) 0 0; font-size: 14px; line-height: 1.8; color: var(--text-dim); max-width: 64ch; }
+.fallback__detail {
+  margin: calc(var(--s) * 3) 0 0;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.7;
+  color: var(--text-faint); word-break: break-word;
+}
 
 /* 真机噪声解释 */
 .noise {
@@ -354,7 +411,13 @@ main { position: relative; z-index: 1; }
 
 /* ── 提问 ─────────────────────────────────────────────── */
 
-.asker { max-width: 720px; }
+.asker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+  gap: calc(var(--s) * 11);
+  align-items: start;
+}
+.asker__main { max-width: 720px; }
 #ask-input {
   width: 100%;
   padding: calc(var(--s) * 5);
@@ -375,6 +438,30 @@ main { position: relative; z-index: 1; }
 .chip:hover { border-color: var(--cyan); color: var(--cyan-bright); }
 
 .asker__act { display: flex; align-items: center; gap: calc(var(--s) * 5); flex-wrap: wrap; }
+
+/* 能做什么 / 做不到什么。零基础用户面对一个空输入框最容易卡住，
+ * 而画出边界比给几个例句更管用——例句只告诉他能抄什么，边界告诉他能想什么。 */
+.scope {
+  display: grid; gap: calc(var(--s) * 8);
+  padding-left: calc(var(--s) * 8);
+  border-left: 1px solid var(--line-soft);
+}
+.scope h3 {
+  margin: 0 0 calc(var(--s) * 4);
+  font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+  color: var(--cyan);
+}
+.scope__col:last-child h3 { color: var(--text-dim); }
+.scope ul { margin: 0; padding: 0; list-style: none; display: grid; gap: calc(var(--s) * 3); }
+.scope li {
+  position: relative; padding-left: calc(var(--s) * 5);
+  font-size: 13.5px; line-height: 1.7; color: var(--text-dim);
+}
+.scope li::before {
+  content: ''; position: absolute; left: 0; top: 9px;
+  width: 5px; height: 1px; background: var(--line-hard);
+}
+.scope__col:last-child li { color: var(--text-faint); }
 
 /* ── 验收 ─────────────────────────────────────────────── */
 
@@ -531,6 +618,12 @@ main { position: relative; z-index: 1; }
   .dock { left: calc(var(--s) * 4); right: calc(var(--s) * 4); bottom: calc(var(--s) * 4); width: auto; }
   .bar { grid-template-columns: auto 1fr; }
   .bar__val { grid-column: 2; text-align: left; min-width: 0; }
+  .asker { grid-template-columns: 1fr; gap: calc(var(--s) * 9); }
+  .scope {
+    padding: calc(var(--s) * 8) 0 0;
+    border-left: none; border-top: 1px solid var(--line-soft);
+  }
+  .stage--center.is-active { min-height: 0; display: block; }
 }
 
 @media (prefers-reduced-motion: reduce) {

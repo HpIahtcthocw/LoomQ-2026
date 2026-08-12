@@ -89,7 +89,7 @@
   </section>
 
   <!-- 1 · 选一个 ---------------------------------------------------------- -->
-  <section class="stage" id="stage-pick">
+  <section class="stage stage--center" id="stage-pick">
     <h2 class="stage__title">先跑一个现成的</h2>
     <p class="stage__lede">三个都是量子计算里最经典的实验。点哪个都行，一秒出结果。</p>
     <div class="cards" id="cards"></div>
@@ -117,6 +117,12 @@
       </div>
 
       <p class="result__intent" id="r-intent"></p>
+
+      <div class="fallback" id="r-fallback" hidden>
+        <div class="fallback__title" id="r-fallback-title"></div>
+        <p class="fallback__hint" id="r-fallback-hint"></p>
+        <p class="fallback__detail" id="r-fallback-detail"></p>
+      </div>
 
       <section class="block">
         <h3 class="block__title">一、电路图</h3>
@@ -153,17 +159,38 @@
   </section>
 
   <!-- 3 · 自己说 ---------------------------------------------------------- -->
-  <section class="stage" id="stage-ask">
+  <section class="stage stage--center" id="stage-ask">
     <h2 class="stage__title">现在换你说</h2>
     <p class="stage__lede">用中文描述你想做的事。不用管术语，说人话就行。</p>
 
     <div class="asker">
-      <textarea id="ask-input" rows="3" placeholder="比如：让三个比特全都纠缠起来"></textarea>
-      <div class="chips" id="ask-chips"></div>
-      <div class="asker__act">
-        <button class="btn btn--primary btn--lg" id="btn-ask">生成并运行</button>
-        <span class="asker__hint" id="ask-hint"></span>
+      <div class="asker__main">
+        <textarea id="ask-input" rows="3" placeholder="比如：让三个比特全都纠缠起来"></textarea>
+        <div class="chips" id="ask-chips"></div>
+        <div class="asker__act">
+          <button class="btn btn--primary btn--lg" id="btn-ask">生成并运行</button>
+          <span class="asker__hint" id="ask-hint"></span>
+        </div>
       </div>
+
+      <aside class="scope">
+        <div class="scope__col">
+          <h3>它听得懂这些</h3>
+          <ul>
+            <li>要几个比特，让它们变成什么状态——纠缠、均匀随机、某个指定的概率</li>
+            <li>在多少种可能里挑出哪一个（这类搜索问题正是量子的强项）</li>
+            <li>在现成的例子上改：「刚才那个改成四个比特」</li>
+          </ul>
+        </div>
+        <div class="scope__col">
+          <h3>它做不到这些</h3>
+          <ul>
+            <li>现实里的具体活儿，比如算房贷、写文案——量子电路只能做数学结构</li>
+            <li>超过十来个比特的电路，模拟器算得动但会很慢，真机更是只有两三个</li>
+            <li>说不清要什么的时候。含糊的描述换来的电路多半也不是你想要的</li>
+          </ul>
+        </div>
+      </aside>
     </div>
   </section>
 
