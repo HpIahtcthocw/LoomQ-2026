@@ -165,9 +165,36 @@ async function replay() {
   // ?job=<编号> 直接回放一个已经跑完的任务。真机一次要排两分钟队，
   // 录演示或截图时不该为了看同一份结果再排一次。
   if (p.get('job')) {
-    const j = await api.job(p.get('job')).catch(() => null);
-    if (j && j.status === 'done') { go('result'); show(j.result); }
-    else toast('这个任务编号取不到了，服务重启后内存里的任务会清空');
+    const id = p.get('job');
+    const j = await api.job(id).catch(() => null);
+    if (!j || j.error) {
+      toast('这个任务编号取不到了，服务重启后内存里的任务会清空');
+    } else if (j.status === 'done') {
+      go('result'); show(j.result);
+    } else {
+      // 任务还在排队。以前这里什么都不做，页面就停在开场——真机排队要一两
+      // 分钟，这期间刷新一下就等于把任务丢了。接回去继续等，垫场结果照常上屏。
+      go('result');
+      $('result').hidden = true;
+      $('running').hidden = false;
+      $('running-title').textContent = '正在送往真实的量子计算机';
+      $('running-log').innerHTML = '';
+      const t0 = Date.now();
+      const waitBox = $('running-wait');
+      waitBox.hidden = false;
+      const tick = setInterval(() => {
+        const s = Math.floor((Date.now() - t0) / 1000);
+        const line = `已等待 ${s} 秒　真机一次来回通常 100 到 120 秒，页面会一直等，不用关`;
+        waitBox.textContent = line;
+        if (!$('r-pending').hidden) $('r-pending-wait').textContent = line;
+      }, 1000);
+      try {
+        await pollUntilDone(id);
+      } finally {
+        clearInterval(tick);
+        waitBox.hidden = true;
+      }
+    }
   } else if (p.get('example')) {
     startClock();
     await run({ example: p.get('example') }, '正在运行');
@@ -223,15 +250,18 @@ async function run(payload, titleHint) {
   }
   if (started.error) return fail(started.error);
 
-  // 真机排队要一两分钟，这期间后端一句进度也不会再吐。没有任何动静的
-  // 一百秒足以让人认为页面死了然后关掉——被试就是这么丢掉真机那一步的。
-  // 秒表本身不提供信息，但它证明这个页面还活着。
+  // 真机排队一次要一百多秒，这期间后端一句进度也不会再吐。实测被试等到
+  // 三四十秒就判定"这个地方不行"，从来没等到过结果。所以排队期间不让他
+  // 对着空屏：先摆一份模拟器算的同一个电路，秒表挂在那份结果上面走。
   const t0 = Date.now();
+  const isHardware = body.backend === 'spinq_cloud';
   const waitBox = $('running-wait');
-  waitBox.hidden = body.backend !== 'spinq_cloud';
+  waitBox.hidden = !isHardware;
   const tick = setInterval(() => {
     const s = Math.floor((Date.now() - t0) / 1000);
-    waitBox.textContent = `已等待 ${s} 秒　排队通常一到两分钟，页面会一直等，不用关`;
+    const line = `已等待 ${s} 秒　真机一次来回通常 100 到 120 秒，页面会一直等，不用关`;
+    waitBox.textContent = line;
+    if (!$('r-pending').hidden) $('r-pending-wait').textContent = line;
   }, 1000);
 
   try {
@@ -244,6 +274,7 @@ async function run(payload, titleHint) {
 
 async function pollUntilDone(jobId) {
   let seen = 0;
+  let previewed = false;
   for (;;) {
     await wait(700);
     let job;
@@ -259,6 +290,12 @@ async function pollUntilDone(jobId) {
         $('running-log').appendChild(li);
       }
       seen = job.progress.length;
+    }
+    // 垫场的模拟结果先上屏，真机回来了再整屏换掉。只上一次，
+    // 后面每轮轮询都重画会把他正在读的那段文字抽走。
+    if (!previewed && job.status === 'running' && job.preview) {
+      previewed = true;
+      show(job.preview);
     }
     if (job.status === 'error') return fail(job.error);
     if (job.status === 'done') return show(job.result);
@@ -287,12 +324,16 @@ function fail(message) {
 }
 
 function show(r) {
-  state.ran += 1;
+  // 垫场那份不算一次实验，也不该动"跑过几次"的计数——真机结果马上就来，
+  // 同一次运行数成两次，后面那些"你已经跑完第一个实验"的话就都错位了。
+  if (!r.provisional) state.ran += 1;
   state.last = r;
   if (r.on_hardware) state.ranHardware = true;
 
   $('running').hidden = true;
   $('result').hidden = false;
+
+  $('r-pending').hidden = !r.provisional;
 
   $('r-backend').textContent = r.on_hardware ? '真实量子计算机 · ' + r.backend_note : r.backend_note;
   $('r-backend').dataset.hw = r.on_hardware ? '1' : '0';
@@ -354,6 +395,18 @@ function paintNext() {
   const btn = $('btn-next');
   const alt = $('btn-alt');
   alt.hidden = true;
+
+  // 垫场结果在屏上时，真机还在排队。这时候再劝他"送到真机上跑"，
+  // 就是让他把已经在跑的东西再排一次队。
+  if (state.last && state.last.provisional) {
+    $('next-title').textContent = '真机还在排队，这一屏待会儿会自己更新';
+    $('next-note').textContent =
+      '上面这份是普通电脑先算的。真机的数据回来之后，这一屏会自动换掉，'
+      + '并且告诉你两边差在哪。等的这会儿可以先把电路图和结果看一遍。';
+    btn.textContent = '不等了，先自己说一个';
+    btn.onclick = () => go('ask');
+    return;
+  }
 
   const toHardware = () => {
     $('sel-backend').value = 'spinq_cloud';

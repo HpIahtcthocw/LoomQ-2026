@@ -14,6 +14,7 @@ import json
 import os
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -142,6 +143,72 @@ def test_fallback() -> None:
 
     check("界面上的后端都在白名单里",
           all(b["id"] in web.KNOWN_BACKENDS for b in web._state()["backends"]))
+
+
+def test_preview() -> None:
+    """真机排队期间必须先垫一份模拟结果。
+
+    实测被试等到三四十秒就判定"真机这里不行"，而真机一次来回要一百多秒——
+    他从来没等到过结果。垫场那份让「跑出第一个实验」这件事不被排队时间绑架：
+    哪怕真机最后没回来，他也已经看过一次完整的结果页了。
+    """
+    section("真机排队时的垫场结果")
+
+    bell_qasm = web.BUILTIN_EXAMPLES["1"][1]
+    original = web.backend_module.run_spinq_cloud
+    released = threading.Event()
+
+    def slow_hardware(*_args, **_kwargs):
+        # 模拟真机排队：卡住不返回，直到主线程确认垫场结果已经挂上。
+        released.wait(timeout=10)
+        raise web.backend_module.BackendUnavailable("自测桩：真机没连上")
+
+    web.backend_module.run_spinq_cloud = slow_hardware
+    job_id = web._new_job()
+    worker = threading.Thread(
+        target=web._run_job,
+        args=(job_id, "垫场自测", bell_qasm, "解释", "spinq_cloud", 64, "学名"),
+        daemon=True,
+    )
+    try:
+        worker.start()
+
+        preview = None
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            with web.JOBS_LOCK:
+                preview = web.JOBS[job_id].get("preview")
+                status = web.JOBS[job_id]["status"]
+            if preview:
+                break
+            time.sleep(0.05)
+
+        check("真机还在跑的时候就挂出了垫场结果", bool(preview))
+        check("垫场时任务仍算进行中", status == "running")
+        if preview:
+            check("垫场结果自报是临时的", preview.get("provisional") is True)
+            check("垫场结果讲明不是真机", not preview["on_hardware"] and "模拟" in preview["backend_note"])
+            check("垫场结果是完整的一屏", bool(
+                preview.get("circuit") and preview.get("explain")
+                and preview.get("legend") and sum(preview["counts"].values()) == 64))
+            check("垫场结果带着解释文字", preview.get("explanation") == "解释")
+    finally:
+        released.set()
+        worker.join(timeout=10)
+        web.backend_module.run_spinq_cloud = original
+
+    with web.JOBS_LOCK:
+        final = web.JOBS[job_id]
+    check("真机回来后任务照常收尾", final["status"] == "done" and final["result"] is not None)
+    check("最终结果不再标临时", not final["result"].get("provisional"))
+
+    html = (web.WEBUI / "index.html").read_text(encoding="utf-8")
+    for node in ("r-pending", "r-pending-wait"):
+        check("页面留了 %s 的位置" % node, 'id="%s"' % node in html)
+
+    app = (web.WEBUI / "app.js").read_text(encoding="utf-8")
+    check("前端会把垫场结果先画出来", "job.preview" in app)
+    check("垫场那次不计进跑过的次数", "if (!r.provisional) state.ran" in app)
 
 
 # --- HTTP -------------------------------------------------------------------
@@ -312,6 +379,7 @@ def main() -> int:
     test_layout()
     test_state()
     test_fallback()
+    test_preview()
     test_http()
     test_assets()
     print("\n%d 通过，%d 失败" % (PASSED, FAILED))

@@ -140,7 +140,8 @@ JOBS_LOCK = threading.Lock()
 def _new_job() -> str:
     job_id = uuid.uuid4().hex[:12]
     with JOBS_LOCK:
-        JOBS[job_id] = {"status": "running", "progress": [], "result": None, "error": None}
+        JOBS[job_id] = {"status": "running", "progress": [], "result": None,
+                        "error": None, "preview": None}
     return job_id
 
 
@@ -154,6 +155,20 @@ def _note(job_id: str, text: str) -> None:
 def _finish(job_id: str, result: Dict[str, Any]) -> None:
     with JOBS_LOCK:
         JOBS[job_id].update(status="done", result=result)
+
+
+def _preview(job_id: str, result: Dict[str, Any]) -> None:
+    """真机排队期间先挂一份模拟器结果，让人有东西看。
+
+    实测被试等到 30 到 60 秒就判定"这个地方不行"，而真机一次来回要 110 秒
+    左右——他从来没等到过结果。秒表能证明页面还活着，但证明不了等下去有意义。
+    先把同一个电路的模拟结果摆出来，等待就从"空耗"变成"等真机回来做对照"，
+    而且「跑出第一个实验」这件事不再被排队时间绑架。
+    """
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job is not None and job["status"] == "running":
+            job["preview"] = result
 
 
 def _fail(job_id: str, message: str) -> None:
@@ -244,20 +259,16 @@ def _execute(
         }
 
 
-def _run_job(job_id: str, title: str, qasm: str, explanation: str, target: str,
-             shots: int, term: str = "") -> None:
-    try:
-        circuit = parse(qasm)
-    except (QasmError, ValueError) as exc:
-        _fail(job_id, "这段电路没能通过检查：%s" % exc)
-        return
-
-    try:
-        counts, backend_note, on_hardware, fallback = _execute(circuit, target, shots, job_id)
-    except Exception as exc:  # noqa: BLE001
-        _fail(job_id, "运行失败：%s: %s" % (type(exc).__name__, exc))
-        return
-
+def _build_result(
+    title: str,
+    term: str,
+    qasm: str,
+    circuit: Circuit,
+    counts: Dict[str, int],
+    backend_note: str,
+    on_hardware: bool,
+) -> Dict[str, Any]:
+    """把一次运行的产出组装成结果页要的那份数据。"""
     total = sum(counts.values()) or 1
     observed = {key: value / total for key, value in counts.items()}
     width = len(next(iter(counts))) if counts else circuit.n_clbits
@@ -266,7 +277,7 @@ def _run_job(job_id: str, title: str, qasm: str, explanation: str, target: str,
         "title": title,
         "term": term,
         "qasm": qasm,
-        "explanation": explanation,
+        "explanation": "",
         "circuit": layout_circuit(circuit),
         "counts": counts,
         "distribution": observed,
@@ -275,10 +286,6 @@ def _run_job(job_id: str, title: str, qasm: str, explanation: str, target: str,
         "on_hardware": on_hardware,
         "legend": bitstring_legend(width),
     }
-    # 只在用户主动要过真机的时候解释回退。默认走模拟器的人没提过这个要求，
-    # 给他弹一条"真机不可用"只会凭空制造一个他本来没有的问题。
-    if fallback and target == "spinq_cloud":
-        result["fallback"] = fallback
 
     if on_hardware:
         # 真机结果被噪声糊过，光看它讲不清电路的意图。拿 refsim 精确算出的理想分布
@@ -289,6 +296,45 @@ def _run_job(job_id: str, title: str, qasm: str, explanation: str, target: str,
         result["noise"] = explain_hardware_noise(observed, ideal)
     else:
         result["explain"] = explain_distribution(observed, total)
+
+    return result
+
+
+def _run_job(job_id: str, title: str, qasm: str, explanation: str, target: str,
+             shots: int, term: str = "") -> None:
+    try:
+        circuit = parse(qasm)
+    except (QasmError, ValueError) as exc:
+        _fail(job_id, "这段电路没能通过检查：%s" % exc)
+        return
+
+    if target == "spinq_cloud":
+        # 排队前先垫一份模拟结果。这一步失败了也只是少个垫子，不能连累正事。
+        try:
+            preview = _build_result(
+                title, term, qasm, circuit, sample(circuit, shots),
+                "普通电脑先模拟的一份（真机还在排队）", False,
+            )
+            preview["explanation"] = explanation
+            preview["provisional"] = True
+            _preview(job_id, preview)
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        counts, backend_note, on_hardware, fallback = _execute(circuit, target, shots, job_id)
+    except Exception as exc:  # noqa: BLE001
+        _fail(job_id, "运行失败：%s: %s" % (type(exc).__name__, exc))
+        return
+
+    result = _build_result(
+        title, term, qasm, circuit, counts, backend_note, on_hardware
+    )
+    result["explanation"] = explanation
+    # 只在用户主动要过真机的时候解释回退。默认走模拟器的人没提过这个要求，
+    # 给他弹一条"真机不可用"只会凭空制造一个他本来没有的问题。
+    if fallback and target == "spinq_cloud":
+        result["fallback"] = fallback
 
     _finish(job_id, result)
 
