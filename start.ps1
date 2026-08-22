@@ -11,7 +11,15 @@ Set-Location $PSScriptRoot
 
 # 1 · Python：优先用仓库自带的 3.10 虚拟环境
 $py = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
-if (-not (Test-Path $py)) {
+if (Test-Path $py) {
+  # 旧 venv 可能还留着启动器，但它指向已经删除的 Python 3.10。
+  # 先实际执行一次；失败时退回系统 Python，至少让内置模拟器和网页入口能启动。
+  & $py --version *> $null
+  if ($LASTEXITCODE -ne 0) {
+    $py = $null
+  }
+}
+if (-not $py -or -not (Test-Path $py)) {
   $py = (Get-Command python -ErrorAction SilentlyContinue).Source
 }
 if (-not $py) {
