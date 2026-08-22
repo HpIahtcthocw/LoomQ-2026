@@ -212,7 +212,7 @@ python tools/selftest_l2_live.py --stretch  # 另加 12 个刻意超纲的进阶
 
 ## 工程与产品化
 
-正式环境复现矩阵与已知边界见 [`formal-repro.md`](formal-repro.md)。陌生用户专项奖实测必须按 [`stranger-five-minute-protocol.md`](stranger-five-minute-protocol.md) 另行完成；当前仓库已有的是作者本人自测，不能冒充陌生被试证据。
+正式环境复现矩阵与已知边界见 [`formal-repro.md`](formal-repro.md)。陌生用户专项奖实测按 [`stranger-five-minute-protocol.md`](stranger-five-minute-protocol.md) 执行，实际结果填写 [`stranger-five-minute-test.md`](stranger-five-minute-test.md)；当前仓库已有的是作者本人自测，不能冒充陌生被试证据。
 
 ```text
 干净环境中的构建和启动命令：
