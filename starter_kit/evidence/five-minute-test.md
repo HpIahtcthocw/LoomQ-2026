@@ -309,3 +309,5 @@
       `G-260813-0006`（Gemini 2 比特，8/13）、`S-260813-0002`（Triangulum 3 比特，8/13 补跑）
 - [ ] 第二轮完成凭证 PNG（页面最后可导出，可选）
 - [ ] 陌生被试那一轮的记录（理想情况，非提交硬门槛）
+
+陌生被试的独立采集表见 [`stranger-five-minute-protocol.md`](stranger-five-minute-protocol.md)。在真实被试完成前，不要把本文件中的作者本人结果改写成陌生用户结果。
