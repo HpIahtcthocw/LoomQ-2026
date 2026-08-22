@@ -39,6 +39,22 @@ shots：1024
 统一 Schema 结果：starter_kit/evidence/files/spinq-cloud-triangulum-ghz3-result.json
 ```
 
+### 2026-08-23 补跑
+
+Python 3.10 环境修好、当前机器的新公钥登记后，又从本仓库重新提交了一次 Bell 电路：
+
+```text
+平台：量旋云 Gemini（gemini_vp，2 比特 NMR 真机）
+任务编号：G-260823-0002
+时间：2026-08-22 18:01:15Z（北京时间 2026-08-23 02:01:15）
+shots：1024
+结果：00=440、11=402、10=129、01=53
+输入电路：starter_kit/evidence/files/final-bell-circuit.qasm
+统一结果：starter_kit/evidence/files/final-bell-result.json
+```
+
+这次结果里 `00` 和 `11` 仍是两个主峰，`10`、`01` 是真机噪声，不把真机结果写成理想模拟器的 50/50。
+
 复现命令（需 `LOOMQ_SPINQ_USERNAME` 与 `LOOMQ_SPINQ_KEYFILE` 两个环境变量，凭据不入库）：
 
 ```text
