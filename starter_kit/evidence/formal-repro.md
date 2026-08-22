@@ -1,6 +1,6 @@
-# 正式环境复现记录
+# 正式环境复现说明
 
-本文只记录可以由提交 commit、命令和仓库文件追溯的结果；没有在本机重新执行的项目标为“待复现”，不把计划或作者口述写成正式通过。
+这份说明把正式评测环境要跑的命令和目前已有的记录放在一起。带“待复现”的项目，不代表已经在这台 Windows 机器上重新跑过。
 
 ## 归档对象
 
@@ -34,11 +34,11 @@ L2 需要由评测环境注入 `LOOMQ_LLM_BASE_URL`、`LOOMQ_LLM_API_KEY`、`LOO
 python starter_kit/evaluator.py --level l2 --json-out /tmp/l2.json
 ```
 
-## 结果与证据索引
+## 目前能对上的记录
 
 | 检查项 | 当前状态 | 证据 |
 |---|---|---|
-| 提交预检 | 已通过 | 预检输出中的 Team ID、fork 和 40 位 commit SHA |
+| 提交预检 | 已通过 | `prepare_submission.py` 的输出 |
 | L1 三平台公开电路 | 已在 Python 3.10.11 环境记录为 6/6 PASS | `evidence/README.md`、`RUNBOOK.md`；公开电路位于 `starter_kit/circuits/` |
 | L3 公开分支 | 已通过 | `python starter_kit/evaluator.py --level l3` |
 | L3 随机差分 | 已通过仓库自测 | `tools/selftest_hybrid.py`，记录的 800 组随机程序结果 |
@@ -46,9 +46,9 @@ python starter_kit/evaluator.py --level l2 --json-out /tmp/l2.json
 | L2 正式模型 | 待在正式注入环境复现 | `starter_kit/l2_policy.json`、`tools/selftest_l2_live.py` |
 | 真机证据 | 已归档 | `evidence/files/spinq-cloud-raw-payloads.json`、各平台 result/circuit 文件 |
 
-## 重要边界
+## 需要注意
 
 - 当前 Windows 工作区的 `.venv` 指向已不存在的 Python 3.10 安装；在该工作区直接运行 L1 会得到“缺少 SDK”的环境错误，不能作为 Linux 正式环境失败证据。
-- `evaluator.py` 的公开结果不是正式隐藏分数；隐藏电路、私有 L2 prompt 和随机 L3 用例仍由组委会重新生成。
+- `evaluator.py` 的公开结果不是正式隐藏分数。隐藏电路、私有 L2 prompt 和随机 L3 用例会由组委会重新生成。
 - 不提交任何 API Key、Token、Cookie 或个人身份信息。
 - 本文件随证据补充而更新；最终提交前重新运行 `prepare_submission.py`，在 Issue 中填写它输出的最新完整 commit SHA。
