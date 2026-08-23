@@ -7,7 +7,7 @@
 | 项目 | 值 |
 |---|---|
 | Fork | `https://github.com/HpIahtcthocw/LoomQ-2026` |
-| Existing evidence commit | `b42019c2d2675389a93b3a6a61f457e9ddc8377f` |
+| 提交版本 | 最终提交 Issue 中填写 `prepare_submission.py` 输出的完整 commit SHA |
 | 合同版本 | `1.0` |
 | Starter Kit | `1.1.0` |
 | 目标运行时 | Linux / Python 3.10 |
