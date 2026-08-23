@@ -48,7 +48,7 @@ python starter_kit/evaluator.py --level l2 --json-out /tmp/l2.json
 
 ## 需要注意
 
-- 当前 Windows 工作区的 `.venv` 指向已不存在的 Python 3.10 安装；在该工作区直接运行 L1 会得到“缺少 SDK”的环境错误，不能作为 Linux 正式环境失败证据。
+- 当前 Windows 工作区已用 Python 3.10.11 重建 `.venv` 并装齐依赖；正式评测仍以干净 Linux / Python 3.10 环境为准。
 - `evaluator.py` 的公开结果不是正式隐藏分数。隐藏电路、私有 L2 prompt 和随机 L3 用例会由组委会重新生成。
 - 不提交任何 API Key、Token、Cookie 或个人身份信息。
 - 本文件随证据补充而更新；最终提交前重新运行 `prepare_submission.py`，在 Issue 中填写它输出的最新完整 commit SHA。
