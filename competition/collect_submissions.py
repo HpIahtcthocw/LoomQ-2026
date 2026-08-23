@@ -185,7 +185,9 @@ def collect(args: argparse.Namespace) -> int:
         "submissions": records,
     }
     (output / "intake-manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        # ASCII-only JSON keeps the manifest readable by Windows tools that still
+        # default to the local GBK code page.
+        json.dumps(manifest, ensure_ascii=True, indent=2) + "\n", encoding="utf-8"
     )
     columns = [
         "team_id", "status", "issue_number", "issue_url", "issue_created_at",
