@@ -67,7 +67,8 @@ def main() -> int:
     if missing:
         raise RuntimeError("缺少必需文件: " + ", ".join(missing))
     issue_url = f"https://github.com/{config['upstream']}/issues/new?template=final-submission.yml"
-    print("✅ 本地提交预检通过\n")
+    # Windows 中文终端常用 GBK，避免用 checkmark 导致“预检已通过但打印失败”。
+    print("[OK] 本地提交预检通过\n")
     print(f"Team ID: {team_id}")
     print(f"Fork repository: {repository}")
     print(f"Commit SHA: {commit_sha}")
