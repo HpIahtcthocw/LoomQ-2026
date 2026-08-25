@@ -14,16 +14,7 @@ except ImportError:
 
 def run_on_originq_simulator(qasm_str: str, shots: int = 1024) -> dict:
     if pq is None:
-        print("[Warning] 未检测到 pyqpanda 模块，无法真正运行本源量子示例。将返回 Mock 数据。")
-        return {
-            "backend": "originq_cpu_simulator_mock",
-            "job_id": "mock-job-123",
-            "shots": shots,
-            "counts": {"00": 510, "11": 514},
-            "bit_order": "little",
-            "timestamp": "2026-07-06T10:00:00Z",
-            "meta": {"info": "Mock data since pyqpanda is not installed"}
-        }
+        raise RuntimeError("未安装 pyqpanda，无法运行本源量子示例；未生成结果")
 
     # 1. 初始化量子虚拟机器 (QVM)
     machine = pq.CPUQVM()

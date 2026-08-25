@@ -18,16 +18,7 @@ except ImportError:
 
 def run_on_spinq_simulator(qasm_str: str, shots: int = 1024) -> dict:
     if sq is None:
-        print("[Warning] 未检测到 spinqit 模块，无法真正运行量旋示例。将返回 Mock 数据。")
-        return {
-            "backend": "spinq_taurus_simulator_mock",
-            "job_id": "mock-job-spinq-456",
-            "shots": shots,
-            "counts": {"00": 505, "11": 519},
-            "bit_order": "little",
-            "timestamp": "2026-07-06T10:00:00Z",
-            "meta": {"info": "Mock data since spinqit is not installed"}
-        }
+        raise RuntimeError("未安装 spinqit，无法运行量旋模拟器示例；未生成结果")
 
     # 1. 将 QASM 2.0 字符串写入临时文件（QASMCompiler 接受文件路径）
     tmp = tempfile.NamedTemporaryFile(
