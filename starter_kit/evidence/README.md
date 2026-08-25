@@ -6,6 +6,10 @@
 
 ## 评委快速核对
 
+![LoomQ 从零基础引导到真机结果的完整流程](files/loomq-walkthrough.gif)
+
+上图由仓库中已经归档的真实页面截图生成；生成脚本为 `tools/build_evidence_gif.py`，没有补画界面或结果。
+
 如果只看一分钟，按下面顺序即可复现本次提交的主线：
 
 1. `start.ps1 --port 8898` 启动网页；首页三个现成示例不需要模型或量子 SDK。
